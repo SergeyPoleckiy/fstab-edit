@@ -4,6 +4,7 @@ package parser_test
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"testing"
 
 	"fstab-edit/internal/parser"
@@ -155,5 +156,65 @@ func TestCommentedEntrySpans(t *testing.T) {
 	}
 	if node.Entry.Source.Start != 2 {
 		t.Errorf("source должен начинаться после '# ': got %d", node.Entry.Source.Start)
+	}
+}
+
+// TestBaseSHA256 фиксирует хеш именно исходных байтов: последующие мутации
+// обязаны оставить эту версию для обнаружения внешнего изменения файла.
+func TestBaseSHA256(t *testing.T) {
+	t.Parallel()
+
+	input := []byte("UUID=abc / ext4 defaults 0 1\r\n")
+	document := parser.Parse(input)
+	want := sha256.Sum256(input)
+	if document.BaseSHA256 != want {
+		t.Fatalf("base hash: got %x, want %x", document.BaseSHA256, want)
+	}
+}
+
+// TestAdditionalEscapes проверяет обязательные libmount escapes, общий
+// трёхзначный octal и буквальное сохранение unknown/incomplete backslash.
+func TestAdditionalEscapes(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		raw   string
+		value string
+	}{
+		{name: "табуляция", raw: `LABEL=A\011B`, value: "LABEL=A\tB"},
+		{name: "backslash", raw: `LABEL=A\134B`, value: `LABEL=A\B`},
+		{name: "другой octal", raw: `LABEL=A\041B`, value: "LABEL=A!B"},
+		{name: "unknown escape", raw: `LABEL=A\qB`, value: `LABEL=A\qB`},
+		{name: "incomplete escape", raw: `LABEL=A\04`, value: `LABEL=A\04`},
+	}
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			document := parser.Parse([]byte(test.raw + " / ext4 defaults 0 0"))
+			entry := document.Nodes[0].Entry
+			if entry == nil || entry.Source.Value != test.value || entry.Source.Raw != test.raw {
+				t.Fatalf("escape decode: entry=%#v, want raw=%q value=%q", entry, test.raw, test.value)
+			}
+		})
+	}
+}
+
+// TestImplausibleCommentedEntries гарантирует, что обычный комментарий
+// с относительным mount или нечисловыми dump/pass не станет записью.
+func TestImplausibleCommentedEntries(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{
+		"# /dev/sda1 relative ext4 defaults 0 0",
+		"# /dev/sda1 /mnt/data ext4 defaults no 0",
+		"# /dev/sda1 /mnt/data ext4 defaults 0 no",
+	} {
+		document := parser.Parse([]byte(input))
+		if document.Nodes[0].Kind != models.NodeComment || document.Nodes[0].Entry != nil {
+			t.Errorf("строка ошибочно признана записью: %q: %#v", input, document.Nodes[0])
+		}
 	}
 }
