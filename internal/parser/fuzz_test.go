@@ -46,3 +46,27 @@ func FuzzRoundTrip(f *testing.F) {
 		}
 	})
 }
+
+// FuzzEncodeField проверяет, что каждое допустимое непустое decoded значение
+// после кодирования разбирается обратно в то же самое значение Source.
+func FuzzEncodeField(f *testing.F) {
+	f.Add("LABEL=My Disk")
+	f.Add("a\\b\tc")
+	f.Add("a\x00b")
+	f.Fuzz(func(t *testing.T, value string) {
+		encoded, err := parser.EncodeField(value)
+		if err != nil {
+			return
+		}
+		if encoded == "" {
+			return
+		}
+		document := parser.Parse([]byte(encoded + " / ext4 defaults 0 0"))
+		if len(document.Nodes) != 1 || document.Nodes[0].Entry == nil {
+			t.Fatalf("encoded field не разобран: value=%q encoded=%q", value, encoded)
+		}
+		if got := document.Nodes[0].Entry.Source.Value; got != value {
+			t.Fatalf("decode/encode: got %q, want %q", got, value)
+		}
+	})
+}
