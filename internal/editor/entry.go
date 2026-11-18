@@ -1,3 +1,8 @@
+// Файл entry.go реализует публичные in-memory операции Add, Edit и Delete слоя editor.
+// Он связывает Selector и модели документа с parser.EncodeField и точечными replacements,
+// проверяет изменения и сохраняет исходное форматирование fstab. Подготовленный candidate
+// передаётся общей транзакционной инфраструктуре из mutation.go; файловый writer и другие
+// операции ввода-вывода находятся за пределами этого слоя и здесь не вызываются.
 package editor
 
 import (
@@ -52,8 +57,13 @@ func replaceRanges(raw string, replacements []replacement) string {
 	return raw
 }
 
-// Add кодирует decoded поля и добавляет новую запись только в память. Сначала
-// готовится независимый candidate; ошибка кодирования или разбора ничего не коммитит.
+// Add добавляет запись с decoded значениями input в document, кодируя поля через parser.
+// Возвращаемый bool равен true только при изменении сериализованных байтов; false с nil
+// означает no-op. Nil document даёт ErrNilDocument, пустое обязательное поле — ErrEmptyField,
+// недопустимые символы — ошибку parser.EncodeField, а сбой пересборки — ErrWrongState.
+// При любой ошибке document остаётся неизменным. Успешный вызов меняет только Nodes и,
+// если требуется, Entry.Line: прежняя последняя строка может получить ending перед новой
+// записью. BaseSHA256 сохраняется. Функция не выполняет файловый или иной ввод-вывод.
 func Add(document *models.Document, input NewEntry) (bool, error) {
 	if document == nil {
 		return false, ErrNilDocument
@@ -92,8 +102,15 @@ func Add(document *models.Document, input NewEntry) (bool, error) {
 	return commitDocument(document, candidate), nil
 }
 
-// Edit точечно изменяет выбранную запись, сохраняя separators, escapes, comments
-// и endings. Все проверки и построение candidate выполняются до единственного commit.
+// Edit применяет changes к записи document, однозначно выбранной через selector,
+// и заменяет только raw ranges изменённых полей, сохраняя separators, escapes и endings.
+// Возвращаемый bool равен true при изменении сериализованных байтов; false с nil означает
+// no-op, включая передачу decoded значения, равного текущему. Ошибки Select возвращаются
+// без изменений; ErrWrongState обозначает неподходящий узел, ErrInvalidChange — конфликт
+// или недопустимый набор changes, ErrEmptyField — пустое явно заданное значение. Ошибки
+// parser.EncodeField и пересборки также не коммитятся. Успешный вызов заменяет выбранный
+// Node и пересчитывает Entry.Line при необходимости; BaseSHA256 сохраняется. Ввод-вывод
+// не выполняется, все побочные эффекты ограничены переданным document.
 func Edit(document *models.Document, selector Selector, changes Changes) (bool, error) {
 	index, err := Select(document, selector)
 	if err != nil {
@@ -252,8 +269,12 @@ func fieldReplacement(value *string, field models.Field) (*replacement, error) {
 	return &replacement{start: field.Start, end: field.End, raw: raw}, nil
 }
 
-// Delete удаляет только выбранный узел записи. Comments, blank lines и их endings
-// остаются в candidate в исходном порядке, а Entry.Line пересчитывается при commit.
+// Delete удаляет из document только узел записи, однозначно выбранной через selector.
+// Возвращаемый bool равен true при изменении сериализованных байтов; false с nil означает
+// no-op. Nil document и ошибки селектора возвращаются как ошибки Select без мутации.
+// Comments, blank lines и их endings сохраняются, а Entry.Line оставшихся записей
+// пересчитывается после успешного удаления. BaseSHA256 не изменяется. Функция не выполняет
+// ввод-вывод и не затрагивает никакое состояние, кроме Nodes и Entry.Line в document.
 func Delete(document *models.Document, selector Selector) (bool, error) {
 	index, err := Select(document, selector)
 	if err != nil {

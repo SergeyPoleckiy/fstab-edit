@@ -72,30 +72,40 @@ func TestEditOptionalFields(t *testing.T) {
 		want    string
 	}{
 		{
+			// Отсутствующий Dump должен появиться сразу после Options с одним tab:
+			// тест обнаруживает переформатирование исходных separators и добавление неявного Pass.
 			name:    "Dump добавляется к четырёхполевой записи одним tab",
 			input:   "UUID=a /mnt/a ext4 defaults\n",
 			changes: editor.Changes{Dump: stringPointer("0")},
 			want:    "UUID=a /mnt/a ext4 defaults\t0\n",
 		},
 		{
+			// Два новых suffix-поля независимы от старых separators, но их порядок фиксирован:
+			// тест обнаруживает перестановку Pass/Dump и потерю одного из значений.
 			name:    "Dump и Pass добавляются одной операцией в заданном порядке",
 			input:   "UUID=a /mnt/a ext4 defaults\n",
 			changes: editor.Changes{Dump: stringPointer("1"), Pass: stringPointer("2")},
 			want:    "UUID=a /mnt/a ext4 defaults\t1\t2\n",
 		},
 		{
+			// Между Dump и Pass специально использован смешанный separator, а после Pass — whitespace:
+			// тест обнаруживает остаточный separator и ошибочное удаление trailing whitespace.
 			name:    "UnsetPass удаляет непрерывный separator и сохраняет trailing whitespace",
 			input:   "UUID=a /mnt/a ext4 defaults  0 \t 2  \t\n",
 			changes: editor.Changes{UnsetPass: true},
 			want:    "UUID=a /mnt/a ext4 defaults  0  \t\n",
 		},
 		{
+			// Удаление двух optional-полей должно быть одним suffix-range от Options:
+			// тест обнаруживает независимые диапазоны, оставляющие separators или часть Dump.
 			name:    "совместный UnsetDump и UnsetPass удаляет общий suffix",
 			input:   "UUID=a /mnt/a ext4 defaults \t 0  2  \t\n",
 			changes: editor.Changes{UnsetDump: true, UnsetPass: true},
 			want:    "UUID=a /mnt/a ext4 defaults  \t\n",
 		},
 		{
+			// Замена Options меняет длину raw-строки до вставки Dump, а trailing whitespace должен остаться в конце:
+			// тест обнаруживает применение replacements слева направо и вставку после trailing whitespace.
 			name:    "Dump добавляется после замены Options без сдвига исходных spans",
 			input:   "  UUID=a\t/mnt/a  ext4\tdefaults   \n",
 			changes: editor.Changes{Options: stringPointer("defaults,noatime"), Dump: stringPointer("1")},
@@ -134,48 +144,64 @@ func TestEditRejectsInvalidChangesAtomically(t *testing.T) {
 		want    error
 	}{
 		{
+			// Одновременные set и unset не имеют однозначного приоритета:
+			// тест обнаруживает молчаливый выбор одной операции и частичное изменение Dump.
 			name:    "Dump конфликтует с UnsetDump",
 			input:   "UUID=a /mnt/a ext4 defaults 0 1\n",
 			changes: editor.Changes{Dump: stringPointer("1"), UnsetDump: true},
 			want:    editor.ErrInvalidChange,
 		},
 		{
+			// Для Pass конфликт проверяется отдельно от Dump, поскольку у полей разная зависимость:
+			// тест обнаруживает неполную валидацию Changes и частичный commit.
 			name:    "Pass конфликтует с UnsetPass",
 			input:   "UUID=a /mnt/a ext4 defaults 0 1\n",
 			changes: editor.Changes{Pass: stringPointer("2"), UnsetPass: true},
 			want:    editor.ErrInvalidChange,
 		},
 		{
+			// Пустой Source нельзя принимать как отсутствие изменения или валидное поле:
+			// тест обнаруживает потерю typed ErrEmptyField и появление нечитаемой записи.
 			name:    "пустое обязательное значение",
 			input:   "UUID=a /mnt/a ext4 defaults 0 1\n",
 			changes: editor.Changes{Source: stringPointer("")},
 			want:    editor.ErrEmptyField,
 		},
 		{
+			// NUL нельзя представить в поле fstab даже через octal escape:
+			// тест обнаруживает обход parser.EncodeField и запись управляющего байта в document.
 			name:    "NUL в новом значении",
 			input:   "UUID=a /mnt/a ext4 defaults 0 1\n",
 			changes: editor.Changes{Source: stringPointer("UUID=\x00bad")},
 			want:    parser.ErrInvalidField,
 		},
 		{
+			// Newline внутри Options создал бы дополнительную физическую строку:
+			// тест обнаруживает нарушение однострочного формата и частичную мутацию при ошибке кодирования.
 			name:    "newline в новом значении",
 			input:   "UUID=a /mnt/a ext4 defaults 0 1\n",
 			changes: editor.Changes{Options: stringPointer("defaults\nnoatime")},
 			want:    parser.ErrInvalidField,
 		},
 		{
+			// Пустой набор изменений отличается от валидного no-op с равным decoded значением:
+			// тест обнаруживает ложный успешный Edit и скрытую нормализацию raw-строки.
 			name:    "пустой Changes",
 			input:   "UUID=a /mnt/a ext4 defaults 0 1\n",
 			changes: editor.Changes{},
 			want:    editor.ErrInvalidChange,
 		},
 		{
+			// В пятом raw-поле parser видит Dump, поэтому добавлять Pass без Dump нельзя:
+			// тест обнаруживает смену семантики поля и появление записи с неверным optional-набором.
 			name:    "Pass без итогового Dump",
 			input:   "UUID=a /mnt/a ext4 defaults\n",
 			changes: editor.Changes{Pass: stringPointer("2")},
 			want:    editor.ErrInvalidChange,
 		},
 		{
+			// После удаления Dump старый Pass сместился бы на его позицию:
+			// тест обнаруживает неявное превращение Pass в Dump вместо отклонения противоречивого состояния.
 			name:    "UnsetDump при оставшемся Pass",
 			input:   "UUID=a /mnt/a ext4 defaults 0 1\n",
 			changes: editor.Changes{UnsetDump: true},
@@ -258,12 +284,22 @@ func TestMutationNilAndSelectorErrors(t *testing.T) {
 		name string
 		run  func(*models.Document) (bool, error)
 	}{
-		{name: "Edit", run: func(document *models.Document) (bool, error) {
-			return editor.Edit(document, editor.ByLine(99), changes)
-		}},
-		{name: "Delete", run: func(document *models.Document) (bool, error) {
-			return editor.Delete(document, editor.ByLine(99))
-		}},
+		{
+			// Edit имеет валидные changes, но не существующий selector:
+			// case обнаруживает подготовку replacements или частичный commit после ошибки Select.
+			name: "Edit",
+			run: func(document *models.Document) (bool, error) {
+				return editor.Edit(document, editor.ByLine(99), changes)
+			},
+		},
+		{
+			// Delete должен использовать тот же ранний выход при ошибке Select:
+			// case обнаруживает удаление узла по невалидному index и изменение BaseSHA256.
+			name: "Delete",
+			run: func(document *models.Document) (bool, error) {
+				return editor.Delete(document, editor.ByLine(99))
+			},
+		},
 	} {
 		document := parser.Parse([]byte("UUID=a /mnt/a ext4 defaults 0 1\n"))
 		before := document.Serialize()
@@ -288,21 +324,29 @@ func TestAddLineEndings(t *testing.T) {
 		want  string
 	}{
 		{
+			// В пустом документе нет подсказки ending, а пустые Dump/Pass означают defaults:
+			// тест обнаруживает отсутствие LF, неполный набор полей и потерю значений "0".
 			name:  "пустой документ получает LF",
 			input: "",
 			want:  "/dev/sda1\t/mnt/a\text4\tdefaults\t0\t0\n",
 		},
 		{
+			// Два CRLF против одного LF задают строгое преобладание:
+			// тест обнаруживает выбор ending последнего узла вместо подсчёта всего документа.
 			name:  "CRLF преобладает",
 			input: "# one\r\n# two\r\n# three\n",
 			want:  "# one\r\n# two\r\n# three\n/dev/sda1\t/mnt/a\text4\tdefaults\t0\t0\r\n",
 		},
 		{
+			// При равном числе endings контракт выбирает LF, а не CRLF или случайный результат:
+			// тест обнаруживает нестрогое сравнение счётчиков и недетерминированный выбор.
 			name:  "при равенстве выбирается LF",
 			input: "# one\r\n# two\n",
 			want:  "# one\r\n# two\n/dev/sda1\t/mnt/a\text4\tdefaults\t0\t0\n",
 		},
 		{
+			// Без добавления ending к прежней последней строке новая запись склеилась бы с комментарием:
+			// тест обнаруживает потерю границы узлов и неверный ending у добавленной записи.
 			name:  "прежний последний node без ending получает выбранный ending",
 			input: "# header",
 			want:  "# header\n/dev/sda1\t/mnt/a\text4\tdefaults\t0\t0\n",
@@ -374,11 +418,23 @@ func TestAddRejectsInvalidInputAtomically(t *testing.T) {
 		mutate func(*editor.NewEntry)
 		want   error
 	}{
+		// Пустой Source проверяется до подстановки defaults и построения candidate:
+		// case обнаруживает неверный typed error и добавление записи с пустым первым полем.
 		{name: "пустой Source", mutate: func(input *editor.NewEntry) { input.Source = "" }, want: editor.ErrEmptyField},
+		// Пустой MountPoint нельзя принимать за отсутствующее optional-значение:
+		// case обнаруживает неполную проверку обязательных полей и частичную мутацию документа.
 		{name: "пустой MountPoint", mutate: func(input *editor.NewEntry) { input.MountPoint = "" }, want: editor.ErrEmptyField},
+		// FSType проверяется отдельно, чтобы таблица не проходила только за счёт валидации Source:
+		// case обнаруживает пропуск третьего обязательного поля и появление нечитаемой записи.
 		{name: "пустой FSType", mutate: func(input *editor.NewEntry) { input.FSType = "" }, want: editor.ErrEmptyField},
+		// Пустой Options также должен давать ErrEmptyField, несмотря на возможный defaults у Dump/Pass:
+		// case обнаруживает непоследовательную валидацию четырёх обязательных значений.
 		{name: "пустой Options", mutate: func(input *editor.NewEntry) { input.Options = "" }, want: editor.ErrEmptyField},
+		// NUL запрещён контрактом EncodeField и не должен попасть в сериализованный документ:
+		// case обнаруживает игнорирование ошибки кодирования и commit ранее подготовленного candidate.
 		{name: "NUL", mutate: func(input *editor.NewEntry) { input.Source = "UUID=\x00bad" }, want: parser.ErrInvalidField},
+		// Newline в MountPoint разбил бы добавляемую запись на две физические строки:
+		// case обнаруживает обход однострочного ограничения и частичное добавление узла при ошибке.
 		{name: "newline", mutate: func(input *editor.NewEntry) { input.MountPoint = "/mnt/bad\nvalue" }, want: parser.ErrInvalidField},
 	} {
 		test := test
