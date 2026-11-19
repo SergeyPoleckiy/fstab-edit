@@ -1,0 +1,6 @@
+0 parse errors, 0 errors, 3 warnings
+/
+   [W] ext4 does not match with on-disk btrfs
+none
+   [W] unreachable source: /dev/sda2: No such file or directory
+   [W] cannot detect on-disk filesystem type (No such file or directory)

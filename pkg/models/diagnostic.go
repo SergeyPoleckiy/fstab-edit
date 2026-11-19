@@ -44,3 +44,21 @@ func (r Report) HasErrors() bool {
 	}
 	return false
 }
+
+// MergeReports объединяет диагностики внутренних и внешних проверок в порядке
+// аргументов и в порядке следования элементов каждого Report. Функция всегда
+// возвращает Report с non-nil Diagnostics, включая отсутствие аргументов.
+// Элементы копируются в новый slice: исходные отчёты не изменяются и не делят
+// backing array с результатом, поэтому последующий append к любому из них
+// не перезаписывает диагностики другого Report.
+func MergeReports(reports ...Report) Report {
+	total := 0
+	for _, report := range reports {
+		total += len(report.Diagnostics)
+	}
+	merged := Report{Diagnostics: make([]Diagnostic, 0, total)}
+	for _, report := range reports {
+		merged.Diagnostics = append(merged.Diagnostics, report.Diagnostics...)
+	}
+	return merged
+}

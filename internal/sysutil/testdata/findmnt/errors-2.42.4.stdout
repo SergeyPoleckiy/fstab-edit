@@ -1,0 +1,8 @@
+2 parse errors, 2 errors, 3 warnings
+relative
+   [E] unreachable on boot required target: No such file or directory
+   [W] ext4 does not match with on-disk btrfs
+/mnt/data
+   [E] unreachable on boot required target: No such file or directory
+   [W] unreachable source: /dev/sda3: No such file or directory
+   [W] cannot detect on-disk filesystem type (No such file or directory)

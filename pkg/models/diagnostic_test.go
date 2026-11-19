@@ -60,3 +60,117 @@ func TestReportHasErrors(t *testing.T) {
 		t.Fatal("error должен блокировать сохранение")
 	}
 }
+
+// TestMergeReportsEmpty проверяет non-nil empty результат для отсутствующих,
+// nil и пустых аргументов: такой Report сразу пригоден для JSON и append.
+func TestMergeReportsEmpty(t *testing.T) {
+	t.Parallel()
+
+	var nilReports []models.Report
+	tests := []struct {
+		name    string
+		reports []models.Report
+	}{
+		{name: "no arguments"},
+		{name: "nil slice", reports: nilReports},
+		{name: "zero reports", reports: []models.Report{{}, {}}},
+		{name: "nil diagnostics", reports: []models.Report{{Diagnostics: nil}, {Diagnostics: nil}}},
+		{name: "empty diagnostics", reports: []models.Report{{Diagnostics: []models.Diagnostic{}}, {Diagnostics: []models.Diagnostic{}}}},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			merged := models.MergeReports(tt.reports...)
+			if merged.Diagnostics == nil {
+				t.Fatal("MergeReports должен возвращать non-nil Diagnostics")
+			}
+			if len(merged.Diagnostics) != 0 {
+				t.Fatalf("пустые аргументы дали диагностики: %+v", merged.Diagnostics)
+			}
+			if merged.HasErrors() {
+				t.Fatal("пустой Report не должен содержать ошибки")
+			}
+		})
+	}
+}
+
+// TestMergeReportsPreservesOrderAndHasErrors проверяет объединение внутренней
+// ошибки и внешнего предупреждения без изменения их относительного порядка.
+func TestMergeReportsPreservesOrderAndHasErrors(t *testing.T) {
+	t.Parallel()
+
+	internal := models.Report{Diagnostics: []models.Diagnostic{
+		{Code: "mount.relative", Severity: models.SeverityError, Message: "Внутренняя ошибка"},
+		{Code: "fs.unknown", Severity: models.SeverityInfo, Message: "Внутреннее пояснение"},
+	}}
+	external := models.Report{Diagnostics: []models.Diagnostic{
+		{Code: "findmnt.warning", Severity: models.SeverityWarning, Message: "Внешнее предупреждение"},
+	}}
+	merged := models.MergeReports(internal, external)
+
+	if len(merged.Diagnostics) != 3 {
+		t.Fatalf("len: got %d, want 3", len(merged.Diagnostics))
+	}
+	wantCodes := []string{"mount.relative", "fs.unknown", "findmnt.warning"}
+	for i, want := range wantCodes {
+		if merged.Diagnostics[i].Code != want {
+			t.Errorf("диагностика %d: got %q, want %q", i, merged.Diagnostics[i].Code, want)
+		}
+	}
+	if !merged.HasErrors() {
+		t.Fatal("внутренняя error должна сохраняться после объединения")
+	}
+	if internal.Diagnostics[0].Code != "mount.relative" || external.Diagnostics[0].Code != "findmnt.warning" {
+		t.Fatal("исходные Report изменены при объединении")
+	}
+}
+
+// TestMergeReportsDoesNotShareSourceArrays проверяет копирование элементов и
+// отсутствие общего backing array даже при запасе capacity у исходных slices.
+func TestMergeReportsDoesNotShareSourceArrays(t *testing.T) {
+	t.Parallel()
+
+	internalDiagnostics := make([]models.Diagnostic, 1, 4)
+	internalDiagnostics[0] = models.Diagnostic{Code: "internal.error", Severity: models.SeverityError, Message: "Исходная ошибка"}
+	internalDiagnostics[:2][1] = models.Diagnostic{Code: "internal.sentinel"}
+	externalDiagnostics := make([]models.Diagnostic, 1, 4)
+	externalDiagnostics[0] = models.Diagnostic{Code: "external.warning", Severity: models.SeverityWarning, Message: "Исходное предупреждение"}
+	externalDiagnostics[:2][1] = models.Diagnostic{Code: "external.sentinel"}
+	internal := models.Report{Diagnostics: internalDiagnostics}
+	external := models.Report{Diagnostics: externalDiagnostics}
+	beforeInternal, err := json.Marshal(internal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeExternal, err := json.Marshal(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	merged := models.MergeReports(internal, external)
+	merged.Diagnostics[0].Code = "merged.changed"
+	merged.Diagnostics = append(merged.Diagnostics,
+		models.Diagnostic{Code: "merged.added", Severity: models.SeverityInfo, Message: "Новая диагностика"})
+
+	afterInternal, err := json.Marshal(internal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterExternal, err := json.Marshal(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterInternal) != string(beforeInternal) {
+		t.Fatalf("internal изменился через merged:\nbefore %s\nafter  %s", beforeInternal, afterInternal)
+	}
+	if string(afterExternal) != string(beforeExternal) {
+		t.Fatalf("external изменился через merged:\nbefore %s\nafter  %s", beforeExternal, afterExternal)
+	}
+	if got := internalDiagnostics[:2][1].Code; got != "internal.sentinel" {
+		t.Fatalf("append в merged перезаписал internal backing array: %q", got)
+	}
+	if got := externalDiagnostics[:2][1].Code; got != "external.sentinel" {
+		t.Fatalf("append в merged перезаписал external backing array: %q", got)
+	}
+}
