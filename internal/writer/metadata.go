@@ -65,7 +65,9 @@ func listXattrs(sourceFD int, operations replaceOperations) ([]string, error) {
 		buffer := make([]byte, size)
 		read, err := operations.flistxattr(sourceFD, buffer)
 		if err != nil {
-			if errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.EOPNOTSUPP) {
+			// После непустого probe отказ read означает потерю подтверждённых
+			// xattrs и обязан запретить rename; пустой list остаётся допустимым.
+			if size == 0 && (errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.EOPNOTSUPP)) {
 				return nil, nil
 			}
 			if errors.Is(err, unix.ERANGE) && retries < xattrMaxRetries {

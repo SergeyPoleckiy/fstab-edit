@@ -674,31 +674,53 @@ func TestReplaceRejectsUnsafeTempMode(t *testing.T) {
 }
 
 // TestReplaceRetriesChangingXattrSizes проверяет повторную size/read пару для
-// list и value после ERANGE, а также копирование выросшего точного value.
+// list и value после ERANGE, рост обоих размеров и выделение новых buffers.
 func TestReplaceRetriesChangingXattrSizes(t *testing.T) {
 	path := writeReplaceTarget(t, []byte("old"), 0o600)
 	operations := productionReplaceOperations()
-	encoded := append([]byte("user.fstab_edit_growing"), 0)
+	initialEncoded := append([]byte("user.a"), 0)
+	grownEncoded := append([]byte("user.fstab_edit_growing"), 0)
+	listSizeCalls := 0
 	listReads := 0
+	listBufferSizes := make([]int, 0, 2)
 	operations.flistxattr = func(_ int, destination []byte) (int, error) {
 		if len(destination) == 0 {
-			return len(encoded), nil
+			listSizeCalls++
+			if listSizeCalls == 1 {
+				return len(initialEncoded), nil
+			}
+			return len(grownEncoded), nil
 		}
 		listReads++
+		listBufferSizes = append(listBufferSizes, len(destination))
 		if listReads == 1 {
 			return 0, unix.ERANGE
 		}
-		return copy(destination, encoded), nil
+		if len(destination) != len(grownEncoded) {
+			t.Fatalf("list buffer не вырос: получено %d, ожидалось %d", len(destination), len(grownEncoded))
+		}
+		return copy(destination, grownEncoded), nil
 	}
+	initialValue := []byte("x")
 	value := []byte("grown-value")
+	valueSizeCalls := 0
 	valueReads := 0
+	valueBufferSizes := make([]int, 0, 2)
 	operations.fgetxattr = func(_ int, _ string, destination []byte) (int, error) {
 		if len(destination) == 0 {
+			valueSizeCalls++
+			if valueSizeCalls == 1 {
+				return len(initialValue), nil
+			}
 			return len(value), nil
 		}
 		valueReads++
+		valueBufferSizes = append(valueBufferSizes, len(destination))
 		if valueReads == 1 {
 			return 0, unix.ERANGE
+		}
+		if len(destination) != len(value) {
+			t.Fatalf("value buffer не вырос: получено %d, ожидалось %d", len(destination), len(value))
 		}
 		return copy(destination, value), nil
 	}
@@ -716,9 +738,60 @@ func TestReplaceRetriesChangingXattrSizes(t *testing.T) {
 	if listReads != 2 || valueReads != 2 {
 		t.Fatalf("неожиданное число read попыток: list=%d value=%d", listReads, valueReads)
 	}
+	if listSizeCalls != 2 || valueSizeCalls != 2 {
+		t.Fatalf("неожиданное число size probes: list=%d value=%d", listSizeCalls, valueSizeCalls)
+	}
+	if len(listBufferSizes) != 2 || listBufferSizes[0] != len(initialEncoded) || listBufferSizes[1] != len(grownEncoded) {
+		t.Fatalf("list buffers не перераспределены по выросшему size: %v", listBufferSizes)
+	}
+	if len(valueBufferSizes) != 2 || valueBufferSizes[0] != len(initialValue) || valueBufferSizes[1] != len(value) {
+		t.Fatalf("value buffers не перераспределены по выросшему size: %v", valueBufferSizes)
+	}
 	if copiedName != "user.fstab_edit_growing" || !bytes.Equal(copiedValue, value) {
 		t.Fatalf("скопирован неверный xattr: name=%q value=%q", copiedName, copiedValue)
 	}
+}
+
+// TestReplaceRejectsUnsupportedReadOfNonemptyXattrList запрещает подавлять
+// EOPNOTSUPP на read после probe, который уже подтвердил непустой list.
+func TestReplaceRejectsUnsupportedReadOfNonemptyXattrList(t *testing.T) {
+	path := writeReplaceTarget(t, []byte("old"), 0o600)
+	operations := productionReplaceOperations()
+	encoded := append([]byte("user.fstab_edit_confirmed"), 0)
+	sizeCalls := 0
+	readCalls := 0
+	operations.flistxattr = func(_ int, destination []byte) (int, error) {
+		if len(destination) == 0 {
+			sizeCalls++
+			return len(encoded), nil
+		}
+		readCalls++
+		return 0, unix.EOPNOTSUPP
+	}
+	renameCalled := false
+	operations.rename = func(oldPath, newPath string) error {
+		renameCalled = true
+		return os.Rename(oldPath, newPath)
+	}
+
+	result, err := replaceWithOperations(path, []byte("new"), operations)
+	if !errors.Is(err, unix.EOPNOTSUPP) {
+		t.Errorf("ожидалась исходная EOPNOTSUPP, получено %v", err)
+	}
+	if result.Replaced {
+		t.Error("Replaced=true после ошибки чтения подтверждённого xattr list")
+	}
+	if renameCalled {
+		t.Error("rename вызван после ошибки чтения подтверждённого xattr list")
+	}
+	data, readErr := os.ReadFile(path)
+	if readErr != nil || string(data) != "old" {
+		t.Errorf("target изменился: %q, %v", data, readErr)
+	}
+	if sizeCalls != 1 || readCalls != 1 {
+		t.Errorf("неожиданные вызовы list: size=%d read=%d", sizeCalls, readCalls)
+	}
+	assertNoReplaceTempFiles(t, path)
 }
 
 // TestReplaceBoundsXattrRetries доказывает ровно четыре повторных read после
