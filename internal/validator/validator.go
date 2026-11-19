@@ -58,8 +58,10 @@ func Validate(document *models.Document) models.Report {
 }
 
 // validateDuplicates сравнивает decoded mount/source только активных записей.
-// Физический номер строки берётся из позиции узла, поэтому comments и blank
-// lines корректно учитываются, а NodeCommentedEntry в обход не попадает.
+// Специальная точка none у swap не регистрируется как mount, но source такой
+// записи проверяется независимо. Физический номер строки берётся из позиции
+// узла, поэтому comments и blank lines корректно учитываются, а
+// NodeCommentedEntry в обход не попадает.
 func validateDuplicates(collector *collector, document *models.Document) {
 	firstMount := make(map[string]int)
 	firstSource := make(map[string]int)
@@ -68,7 +70,9 @@ func validateDuplicates(collector *collector, document *models.Document) {
 			continue
 		}
 		line := index + 1
-		checkDuplicate(collector, firstMount, node.Entry.MountPoint.Value, line, "mount_point", "duplicate.mount", models.SeverityError)
+		if node.Entry.FSType.Value != "swap" || node.Entry.MountPoint.Value != "none" {
+			checkDuplicate(collector, firstMount, node.Entry.MountPoint.Value, line, "mount_point", "duplicate.mount", models.SeverityError)
+		}
 		checkDuplicate(collector, firstSource, node.Entry.Source.Value, line, "source", "duplicate.source", models.SeverityWarning)
 	}
 }

@@ -1,3 +1,6 @@
+// Файл entry.go проверяет поля одной активной записи fstab: общие ограничения
+// и escapes, source, mount point, тип файловой системы и числовые dump/pass.
+// Здесь также применяется специальное правило mount none для swap.
 package validator
 
 import (

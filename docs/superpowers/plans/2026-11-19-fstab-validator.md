@@ -441,7 +441,7 @@ Special diagnostics выполняются после разбора options: mo
 
 - [ ] **Step 3: Реализовать duplicates после per-entry проверки**
 
-Добавить вызов `validateDuplicates(collector, document)` после цикла в Validate. Использовать map decoded value → first physical line только для `NodeEntry` с `Entry != nil` и непустым значением:
+Добавить вызов `validateDuplicates(collector, document)` после цикла в Validate. Использовать map decoded value → first physical line только для `NodeEntry` с `Entry != nil` и непустым значением. Для swap с `MountPoint.Value == "none"` значение не регистрируется и не проверяется в mount duplicates; `Source.Value` продолжает проверяться независимо:
 
 ```go
 func validateDuplicates(collector *collector, document *models.Document) {
@@ -452,7 +452,9 @@ func validateDuplicates(collector *collector, document *models.Document) {
 			continue
 		}
 		line := index + 1
-		checkDuplicate(collector, firstMount, node.Entry.MountPoint.Value, line, "mount_point", "duplicate.mount", models.SeverityError)
+		if node.Entry.FSType.Value != "swap" || node.Entry.MountPoint.Value != "none" {
+			checkDuplicate(collector, firstMount, node.Entry.MountPoint.Value, line, "mount_point", "duplicate.mount", models.SeverityError)
+		}
 		checkDuplicate(collector, firstSource, node.Entry.Source.Value, line, "source", "duplicate.source", models.SeverityWarning)
 	}
 }

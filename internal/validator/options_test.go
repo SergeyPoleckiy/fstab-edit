@@ -1,3 +1,6 @@
+// Файл options_test.go проверяет разбор опций, специальные диагностики и
+// повторы mount/source, включая допустимость нескольких swap с точкой none.
+// Все сценарии используют документы в памяти и не обращаются к /etc/fstab.
 package validator_test
 
 import (
@@ -577,6 +580,57 @@ func TestDuplicatesActiveEntries(t *testing.T) {
 		Code: "duplicate.source", Severity: models.SeverityWarning, Line: 2,
 		Field: "source", Params: map[string]string{"first_line": "1"},
 	})
+}
+
+// TestDuplicatesSwapNoneAllowed разрешает несколько активных swap-записей с
+// разными source: специальная точка none не является общей точкой монтирования.
+func TestDuplicatesSwapNoneAllowed(t *testing.T) {
+	t.Parallel()
+
+	input := "/dev/sda1 none swap defaults 0 0\n/dev/sdb1 none swap defaults 0 0\n"
+	report := validator.Validate(parser.Parse([]byte(input)))
+	want := []string{"warning:swap.review", "warning:swap.review"}
+	if got := codes(report); !reflect.DeepEqual(got, want) {
+		t.Fatalf("diagnostics: got %v, want %v; report=%#v", got, want, report.Diagnostics)
+	}
+	requireNoCode(t, report, "duplicate.mount")
+	if report.HasErrors() {
+		t.Fatalf("несколько swap с none не должны блокировать сохранение: %#v", report.Diagnostics)
+	}
+}
+
+// TestDuplicatesSwapSourceStillChecked сохраняет независимую проверку source,
+// даже когда повторная специальная точка none исключена из mount duplicates.
+func TestDuplicatesSwapSourceStillChecked(t *testing.T) {
+	t.Parallel()
+
+	input := "/dev/sda1 none swap defaults 0 0\n/dev/sda1 none swap defaults 0 0\n"
+	report := validator.Validate(parser.Parse([]byte(input)))
+	want := []string{"warning:swap.review", "warning:swap.review", "warning:duplicate.source"}
+	if got := codes(report); !reflect.DeepEqual(got, want) {
+		t.Fatalf("diagnostics: got %v, want %v; report=%#v", got, want, report.Diagnostics)
+	}
+	requireNoCode(t, report, "duplicate.mount")
+	requireOneDiagnostic(t, report, models.Diagnostic{
+		Code: "duplicate.source", Severity: models.SeverityWarning, Line: 2,
+		Field: "source", Params: map[string]string{"first_line": "1"},
+	})
+}
+
+// TestDuplicatesOrdinaryAbsoluteMount подтверждает, что исключение для swap none
+// не ослабляет блокирующую диагностику повторной обычной точки монтирования.
+func TestDuplicatesOrdinaryAbsoluteMount(t *testing.T) {
+	t.Parallel()
+
+	input := "/dev/sda1 /mnt/data ext4 defaults 0 0\n/dev/sdb1 /mnt/data ext4 defaults 0 0\n"
+	report := validator.Validate(parser.Parse([]byte(input)))
+	requireOneDiagnostic(t, report, models.Diagnostic{
+		Code: "duplicate.mount", Severity: models.SeverityError, Line: 2,
+		Field: "mount_point", Value: "/mnt/data", Params: map[string]string{"first_line": "1"},
+	})
+	if !report.HasErrors() {
+		t.Fatalf("повтор ordinary absolute mount должен блокировать сохранение: %#v", report.Diagnostics)
+	}
 }
 
 // TestDuplicatesEscapedValues проверяет сравнение decoded значений: разные Raw
