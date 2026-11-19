@@ -377,6 +377,61 @@ func TestVerifyCandidateWriteFailure(t *testing.T) {
 	assertCandidateReportRedacted(t, verification)
 }
 
+func TestVerifyCandidateAbsFailureCleansCreatedDirectory(t *testing.T) {
+	tempRoot := isolateCandidateTemp(t)
+	originalMkdirTemp := candidateMkdirTemp
+	originalWriteFile := candidateWriteFile
+	originalRemoveAll := candidateRemoveAll
+	originalAbs := candidateAbs
+	t.Cleanup(func() {
+		candidateMkdirTemp = originalMkdirTemp
+		candidateWriteFile = originalWriteFile
+		candidateRemoveAll = originalRemoveAll
+		candidateAbs = originalAbs
+	})
+	candidateMkdirTemp = os.MkdirTemp
+	createdDirectory := ""
+	absErr := errors.New("private absolute path failure")
+	candidateAbs = func(path string) (string, error) {
+		createdDirectory = path
+		return "", absErr
+	}
+	writeCalls := 0
+	candidateWriteFile = func(path string, data []byte, perm os.FileMode) error {
+		writeCalls++
+		return nil
+	}
+	removedPaths := []string{}
+	candidateRemoveAll = func(path string) error {
+		removedPaths = append(removedPaths, path)
+		return os.RemoveAll(path)
+	}
+	runner := &fakeFindmntRunner{}
+
+	verification := VerifyCandidate(context.Background(), runner, []byte("do-not-leak-candidate"))
+
+	assertFindmntCodes(t, verification.Report, "findmnt.candidate/error")
+	if createdDirectory == "" || filepath.Dir(createdDirectory) != tempRoot {
+		t.Fatalf("неожиданный созданный directory: %q, temp root: %q", createdDirectory, tempRoot)
+	}
+	if !reflect.DeepEqual(removedPaths, []string{createdDirectory}) {
+		t.Errorf("RemoveAll paths: got %#v, want %#v", removedPaths, []string{createdDirectory})
+	}
+	if _, err := os.Stat(createdDirectory); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("private directory не удалён после ошибки Abs: stat err=%v", err)
+	}
+	if writeCalls != 0 {
+		t.Errorf("WriteFile вызван %d раз после ошибки Abs", writeCalls)
+	}
+	if runner.calls != 0 {
+		t.Errorf("runner вызван %d раз после ошибки Abs", runner.calls)
+	}
+	if verification.Execution.ExitCode != -1 || !errors.Is(verification.Execution.Err, absErr) {
+		t.Errorf("исходная ошибка Abs не сохранена: %+v", verification.Execution)
+	}
+	assertCandidateReportRedacted(t, verification)
+}
+
 // TestVerifyCandidateCleanupFailurePreservesPrimaryResult проверяет warning при
 // ошибке RemoveAll и неизменность первичной findmnt-ошибки и Execution.Err.
 func TestVerifyCandidateCleanupFailurePreservesPrimaryResult(t *testing.T) {

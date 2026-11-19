@@ -21,6 +21,9 @@ var (
 	candidateMkdirTemp = os.MkdirTemp
 	candidateWriteFile = os.WriteFile
 	candidateRemoveAll = os.RemoveAll
+	// candidateAbs позволяет детерминированно проверить cleanup при ошибке
+	// преобразования пути; production использует непосредственно filepath.Abs.
+	candidateAbs = filepath.Abs
 )
 
 // VerifyCandidate объединяет внутреннюю валидацию и внешнюю проверку candidate.
@@ -33,8 +36,9 @@ func VerifyCandidate(ctx context.Context, runner CommandRunner, candidate []byte
 	if err != nil {
 		return candidatePreparationFailure(err)
 	}
+	cleanupDirectory := directory
 	defer func() {
-		if err := candidateRemoveAll(directory); err != nil {
+		if err := candidateRemoveAll(cleanupDirectory); err != nil {
 			// Cleanup warning дополняет первичный Report, но не заменяет его и не
 			// перезаписывает Execution.Err исходной проверки или подготовки файла.
 			appendFindmntDiagnostic(&verification.Report, "findmnt.candidate_cleanup", models.SeverityWarning,
@@ -42,10 +46,11 @@ func VerifyCandidate(ctx context.Context, runner CommandRunner, candidate []byte
 		}
 	}()
 
-	directory, err = filepath.Abs(directory)
+	directory, err = candidateAbs(directory)
 	if err != nil {
 		return candidatePreparationFailure(err)
 	}
+	cleanupDirectory = directory
 	path := filepath.Join(directory, "candidate.fstab")
 	if err := candidateWriteFile(path, candidate, 0o600); err != nil {
 		return candidatePreparationFailure(err)
