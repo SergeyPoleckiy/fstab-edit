@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -103,6 +104,8 @@ func TestResolveInDirectoriesRejectsInvalidNames(t *testing.T) {
 		{name: ""},
 		// Текущий каталог не является именем утилиты.
 		{name: "."},
+		// Родительский каталог также запрещён как специальное имя.
+		{name: ".."},
 		// Относительный путь с разделителем запрещён.
 		{name: "tool/name"},
 		// Выход в родительский каталог запрещён.
@@ -165,10 +168,13 @@ func TestResolveExecutableDoesNotUsePATH(t *testing.T) {
 // TestRunnerHelperProcess реализует отдельный процесс с управляемым выводом и завершением.
 func TestRunnerHelperProcess(t *testing.T) {
 	// В parent suite нет разделителя аргументов, поэтому helper немедленно возвращается.
-	mode := ""
+	mode, pidFile := "", ""
 	for i, arg := range os.Args {
 		if arg == "--" && i+1 < len(os.Args) {
 			mode = os.Args[i+1]
+			if i+2 < len(os.Args) {
+				pidFile = os.Args[i+2]
+			}
 			break
 		}
 	}
@@ -196,6 +202,27 @@ func TestRunnerHelperProcess(t *testing.T) {
 	case "large":
 		fmt.Print(strings.Repeat("A", 128))
 		fmt.Fprint(os.Stderr, strings.Repeat("B", 128))
+		os.Exit(0)
+	// Режим descendant оставляет после смерти helper долгоживущий child с его stdout/stderr.
+	case "descendant":
+		if pidFile == "" {
+			os.Exit(2)
+		}
+		child := exec.Command(os.Args[0], "-test.run=^TestRunnerHelperProcess$", "--", "descendant-child")
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
+		if err := child.Start(); err != nil {
+			os.Exit(2)
+		}
+		if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", child.Process.Pid)), 0o600); err != nil {
+			_ = child.Process.Kill()
+			os.Exit(2)
+		}
+		time.Sleep(5 * time.Second)
+		os.Exit(0)
+	// Короткое время жизни child ограничивает RED-тест даже без WaitDelay.
+	case "descendant-child":
+		time.Sleep(3 * time.Second)
 		os.Exit(0)
 	default:
 		os.Exit(2)
@@ -270,6 +297,41 @@ func TestRunnerTimeout(t *testing.T) {
 	}
 }
 
+// TestRunnerDescendantKeepsPipesOpen проверяет, что потомок не удерживает Run после deadline.
+func TestRunnerDescendantKeepsPipesOpen(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "descendant.pid")
+	// Cleanup завершает потомка по сохранённому PID и после успеха, и после любой проверки.
+	t.Cleanup(func() {
+		pidData, err := os.ReadFile(pidFile)
+		if err != nil {
+			return
+		}
+		var pid int
+		if _, err := fmt.Sscanf(string(pidData), "%d", &pid); err == nil && pid > 0 {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+
+	runner := &Runner{Timeout: 200 * time.Millisecond, OutputLimit: DefaultOutputLimit}
+	started := time.Now()
+	result := runner.runAbsolute(
+		context.Background(), os.Args[0],
+		"-test.run=^TestRunnerHelperProcess$", "--", "descendant", pidFile,
+	)
+	elapsed := time.Since(started)
+
+	// Граница оставляет большой запас над timeout и WaitDelay, но меньше жизни потомка.
+	if elapsed >= 2*time.Second {
+		t.Fatalf("Run ждал закрытия pipe потомком: elapsed=%v, result=%+v", elapsed, result)
+	}
+	if !result.TimedOut {
+		t.Fatalf("ожидался TimedOut=true, result=%+v", result)
+	}
+	if !errors.Is(result.Err, context.DeadlineExceeded) {
+		t.Fatalf("ожидался context.DeadlineExceeded, получено %v", result.Err)
+	}
+}
+
 // TestRunnerParentCancellation проверяет отмену parent context без маскировки под timeout.
 func TestRunnerParentCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -320,6 +382,33 @@ func TestRunnerStartFailure(t *testing.T) {
 	}
 }
 
+// TestRunnerSettingsDefaults проверяет точные defaults для nil, zero и negative Runner.
+func TestRunnerSettingsDefaults(t *testing.T) {
+	tests := []struct {
+		name   string
+		runner *Runner
+	}{
+		// Nil receiver не должен ни паниковать, ни отключать ограничения.
+		{name: "nil", runner: nil},
+		// Zero-value Runner получает оба значения по умолчанию.
+		{name: "zero", runner: &Runner{}},
+		// Отрицательные значения заменяются безопасными defaults.
+		{name: "negative", runner: &Runner{Timeout: -time.Second, OutputLimit: -1}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			timeout, limit := tt.runner.settings()
+			if timeout != 10*time.Second {
+				t.Fatalf("Timeout: got %v, want %v", timeout, 10*time.Second)
+			}
+			if limit != 64*1024 {
+				t.Fatalf("OutputLimit: got %d, want %d", limit, 64*1024)
+			}
+		})
+	}
+}
+
 // TestRunnerZeroValue проверяет применение defaults нулевым Runner без ожидания реального timeout.
 func TestRunnerZeroValue(t *testing.T) {
 	var runner Runner
@@ -330,6 +419,18 @@ func TestRunnerZeroValue(t *testing.T) {
 	}
 	if result.StdoutTruncated || result.StderrTruncated || result.TimedOut {
 		t.Fatalf("unexpected flags: %+v", result)
+	}
+}
+
+// TestRunnerNilReceiver проверяет завершение helper через nil Runner без реальных 10 секунд ожидания.
+func TestRunnerNilReceiver(t *testing.T) {
+	var runner *Runner
+	result := runHelper(t, runner, context.Background(), "success")
+	if result.Err != nil || result.ExitCode != 0 {
+		t.Fatalf("nil receiver run failed: code=%d err=%v", result.ExitCode, result.Err)
+	}
+	if result.Stdout != "outLC_ALL=C\n" || result.Stderr != "err" {
+		t.Fatalf("unexpected output: stdout=%q stderr=%q", result.Stdout, result.Stderr)
 	}
 }
 

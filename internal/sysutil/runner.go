@@ -23,6 +23,9 @@ const (
 	// DefaultOutputLimit ограничивает сохраняемый размер каждого потока вывода.
 	// stdout и stderr учитываются независимо, чтобы один поток не вытеснял другой.
 	DefaultOutputLimit = 64 * 1024
+	// commandWaitDelay ограничивает ожидание EOF от потомков после deadline или отмены.
+	// Без этой границы унаследованные stdout/stderr могут удерживать Run после смерти helper.
+	commandWaitDelay = 250 * time.Millisecond
 )
 
 var (
@@ -91,7 +94,7 @@ func ResolveExecutable(name string) (string, error) {
 // Symlink на regular executable разрешён через os.Stat, поскольку на поддерживаемых Linux
 // системах /bin и /sbin могут быть штатными ссылками на /usr/bin и /usr/sbin.
 func resolveInDirectories(name string, directories []string) (string, error) {
-	if name == "" || name == "." || filepath.Base(name) != name || filepath.IsAbs(name) {
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name || filepath.IsAbs(name) {
 		return "", fmt.Errorf("%w: %q", ErrInvalidExecutable, name)
 	}
 
@@ -200,6 +203,7 @@ func (r *Runner) runAbsolute(ctx context.Context, path string, args ...string) R
 	stdout := &limitedBuffer{limit: limit}
 	stderr := &limitedBuffer{limit: limit}
 	command := exec.CommandContext(runContext, path, args...)
+	command.WaitDelay = commandWaitDelay
 	command.Stdout = stdout
 	command.Stderr = stderr
 	command.Env = localeEnvironment()
