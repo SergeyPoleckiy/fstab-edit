@@ -803,7 +803,7 @@ func associatedCommentRange(document *models.Document, entryIndex int) (int, int
 
 Пояснить в комментарии, что блок с индексом 0 неотличим от заголовка и потому намеренно сохраняется. Это консервативное ограничение распространяется и на comment первой записи: новый блок добавляется, существующий начальный не перезаписывается и не удаляется.
 
-Создание comment nodes:
+Создание comment nodes обязано повторно классифицировать каждую строку через `parser.Parse`. Принимается только результат из ровно одного `NodeComment` с `Entry == nil`; entry-like text, который parser распознаёт как `NodeCommentedEntry`, отклоняется с `ErrInvalidChange`. Это исключает ложные selector matches и сохраняет корректный associated range. Ошибка возвращается до commit, поэтому Add/Edit не изменяют исходный документ даже при одновременных валидных field changes:
 
 ```go
 func makeCommentNodes(text, ending string) ([]models.Node, error) {
@@ -813,13 +813,18 @@ func makeCommentNodes(text, ending string) ([]models.Node, error) {
 	lines := strings.Split(text, "\n")
 	nodes := make([]models.Node, len(lines))
 	for index, line := range lines {
-		nodes[index] = models.Node{Kind: models.NodeComment, Raw: "# " + line, Ending: ending}
+		parsed := parser.Parse([]byte("# " + line))
+		if len(parsed.Nodes) != 1 || parsed.Nodes[0].Kind != models.NodeComment || parsed.Nodes[0].Entry != nil {
+			return nil, ErrInvalidChange
+		}
+		nodes[index] = parsed.Nodes[0]
+		nodes[index].Ending = ending
 	}
 	return nodes, nil
 }
 ```
 
-При замене существующего associated block переиспользовать endings по индексу, чтобы одинаковый текст давал no-op; для дополнительных lines использовать `dominantEnding`. Add вставляет comment nodes перед новым entry. Edit применяет field changes и comment changes к candidate, но коммит выполняет один раз. Расширить проверку `Changes{}` учётом Comment/ClearComment. Никакие ошибки не должны оставить частично изменённый исходный document.
+Для Add и Edit нужны regression tests с entry-like comment, проверкой атомарности и стабильности `Parse(Serialize(document))` для принятых comments. При замене существующего associated block переиспользовать endings по индексу, чтобы одинаковый текст давал no-op; для дополнительных lines использовать `dominantEnding`. Add вставляет comment nodes перед новым entry. Edit применяет field changes и comment changes к candidate, но коммит выполняет один раз. Расширить проверку `Changes{}` учётом Comment/ClearComment. Никакие ошибки не должны оставить частично изменённый исходный document.
 
 - [ ] **Step 5: Добавить fuzz comment/uncomment и проверить весь пакет**
 

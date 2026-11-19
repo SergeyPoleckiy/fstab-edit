@@ -88,6 +88,46 @@ func TestEditOptionalFields(t *testing.T) {
 			want:    "UUID=a /mnt/a ext4 defaults\t1\t2\n",
 		},
 		{
+			// Замена существующего Dump ограничена его byte span, а не всем suffix:
+			// смешанные separators, старый Pass и trailing whitespace должны остаться побайтово прежними.
+			name:    "существующий Dump заменяется без изменения separators и Pass",
+			input:   "UUID=a\t/mnt/a  ext4 defaults \t0  1  \t\n",
+			changes: editor.Changes{Dump: stringPointer("1")},
+			want:    "UUID=a\t/mnt/a  ext4 defaults \t1  1  \t\n",
+		},
+		{
+			// Замена существующего Pass не должна затрагивать ни Dump, ни whitespace вокруг него:
+			// case обнаруживает неверные Start/End и нормализацию смешанных separators.
+			name:    "существующий Pass заменяется без изменения Dump и whitespace",
+			input:   "UUID=a /mnt/a ext4 defaults  0 \t 1  \t\n",
+			changes: editor.Changes{Pass: stringPointer("2")},
+			want:    "UUID=a /mnt/a ext4 defaults  0 \t 2  \t\n",
+		},
+		{
+			// У пятиполевой записи Pass вставляется сразу после Dump с одним tab:
+			// два исходных space перед Dump и trailing whitespace после него сохраняются.
+			name:    "Pass добавляется к пятиполевой записи перед trailing whitespace",
+			input:   "UUID=a /mnt/a ext4 defaults  0  \t\n",
+			changes: editor.Changes{Pass: stringPointer("2")},
+			want:    "UUID=a /mnt/a ext4 defaults  0\t2  \t\n",
+		},
+		{
+			// Единственный Dump удаляется вместе со всем separator перед ним:
+			// case обнаруживает остаточный separator и удаление trailing whitespace после Dump.
+			name:    "UnsetDump удаляет единственный Dump и предшествующий separator",
+			input:   "UUID=a /mnt/a ext4 defaults \t 0  \t\n",
+			changes: editor.Changes{UnsetDump: true},
+			want:    "UUID=a /mnt/a ext4 defaults  \t\n",
+		},
+		{
+			// Замена Dump и удаление Pass используют исходные непересекающиеся ranges:
+			// case обнаруживает сдвиг Dump span после suffix deletion и потерю trailing whitespace.
+			name:    "Dump заменяется одновременно с UnsetPass",
+			input:   "UUID=a /mnt/a ext4 defaults \t0  1  \t\n",
+			changes: editor.Changes{Dump: stringPointer("1"), UnsetPass: true},
+			want:    "UUID=a /mnt/a ext4 defaults \t1  \t\n",
+		},
+		{
 			// Между Dump и Pass специально использован смешанный separator, а после Pass — whitespace:
 			// тест обнаруживает остаточный separator и ошибочное удаление trailing whitespace.
 			name:    "UnsetPass удаляет непрерывный separator и сохраняет trailing whitespace",
@@ -130,6 +170,21 @@ func TestEditOptionalFields(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestEditUnsetMissingOptionalFieldsIsNoop проверяет, что отсутствующие Dump и Pass
+// можно очистить без изменения байтов: mixed separators, trailing whitespace и BaseSHA256 сохраняются.
+func TestEditUnsetMissingOptionalFieldsIsNoop(t *testing.T) {
+	t.Parallel()
+
+	input := []byte("UUID=a\t/mnt/a  ext4 defaults \t \n")
+	document := parser.Parse(input)
+	base := document.BaseSHA256
+	changed, err := editor.Edit(document, editor.ByLine(1), editor.Changes{UnsetDump: true, UnsetPass: true})
+	if err != nil || changed {
+		t.Fatalf("no-op unset: changed=%v err=%v", changed, err)
+	}
+	assertUnchanged(t, document, input, base)
 }
 
 // TestEditRejectsInvalidChangesAtomically проверяет typed errors для конфликтов,
@@ -717,5 +772,115 @@ func TestDeletePreservesAssociatedComment(t *testing.T) {
 	}
 	if document.BaseSHA256 != base {
 		t.Fatal("delete не должен пересчитывать base hash")
+	}
+}
+
+// TestEntryLikeAssociatedCommentRejectedAtomically проверяет, что syntactically
+// похожий на запись comment не становится NodeCommentedEntry и не создаёт ложный selector match.
+// Одновременное валидное изменение Options в Edit выявляет частичный commit до ошибки comment.
+func TestEntryLikeAssociatedCommentRejectedAtomically(t *testing.T) {
+	t.Parallel()
+
+	comment := "UUID=old /mnt/old ext4 defaults 0 0"
+	for _, test := range []struct {
+		name     string
+		document *models.Document
+		run      func(*models.Document) (bool, error)
+	}{
+		{
+			name:     "Add",
+			document: parser.Parse([]byte("# untouched\n")),
+			run: func(document *models.Document) (bool, error) {
+				return editor.Add(document, editor.NewEntry{
+					Source:     "UUID=new",
+					MountPoint: "/mnt/new",
+					FSType:     "ext4",
+					Options:    "defaults",
+					Comment:    &comment,
+				})
+			},
+		},
+		{
+			name:     "Edit",
+			document: parser.Parse([]byte("# header\n\n# old\nUUID=new /mnt/new ext4 defaults 0 0\n")),
+			run: func(document *models.Document) (bool, error) {
+				return editor.Edit(document, editor.ByLine(4), editor.Changes{
+					Options: stringPointer("noatime"),
+					Comment: &comment,
+				})
+			},
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			before := test.document.Serialize()
+			base := test.document.BaseSHA256
+			changed, err := test.run(test.document)
+			if changed || !errors.Is(err, editor.ErrInvalidChange) {
+				t.Fatalf("changed=%v err=%v, want ErrInvalidChange", changed, err)
+			}
+			assertUnchanged(t, test.document, before, base)
+		})
+	}
+}
+
+// TestAcceptedAssociatedCommentsSurviveReparse проверяет для Add и Edit, что принятый
+// multiline comment после Parse(Serialize(document)) остаётся обычными NodeComment без Entry.
+// Вторая строка намеренно содержит шесть полей, но implausible mount и dump запрещают classification.
+func TestAcceptedAssociatedCommentsSurviveReparse(t *testing.T) {
+	t.Parallel()
+
+	comment := "обычное пояснение\n/dev/sda1 relative ext4 defaults no 0"
+	for _, test := range []struct {
+		name         string
+		document     *models.Document
+		commentLines []int
+		run          func(*models.Document) (bool, error)
+	}{
+		{
+			name:         "Add",
+			document:     parser.Parse([]byte("# header\n\n")),
+			commentLines: []int{3, 4},
+			run: func(document *models.Document) (bool, error) {
+				return editor.Add(document, editor.NewEntry{
+					Source:     "UUID=new",
+					MountPoint: "/mnt/new",
+					FSType:     "ext4",
+					Options:    "defaults",
+					Comment:    &comment,
+				})
+			},
+		},
+		{
+			name:         "Edit",
+			document:     parser.Parse([]byte("# header\n\n# old one\n# old two\nUUID=new /mnt/new ext4 defaults 0 0\n")),
+			commentLines: []int{3, 4},
+			run: func(document *models.Document) (bool, error) {
+				return editor.Edit(document, editor.ByLine(5), editor.Changes{Comment: &comment})
+			},
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			changed, err := test.run(test.document)
+			if err != nil || !changed {
+				t.Fatalf("changed=%v err=%v", changed, err)
+			}
+			serialized := test.document.Serialize()
+			reparsed := parser.Parse(serialized)
+			if got := reparsed.Serialize(); !bytes.Equal(got, serialized) {
+				t.Fatalf("reparse изменил байты:\ngot  %q\nwant %q", got, serialized)
+			}
+			for _, line := range test.commentLines {
+				node := reparsed.Nodes[line-1]
+				if node.Kind != models.NodeComment || node.Entry != nil {
+					t.Errorf("comment line %d переклассифицирована: %#v", line, node)
+				}
+			}
+		})
 	}
 }

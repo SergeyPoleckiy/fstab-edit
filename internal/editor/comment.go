@@ -6,6 +6,7 @@ package editor
 import (
 	"strings"
 
+	"fstab-edit/internal/parser"
 	"fstab-edit/pkg/models"
 )
 
@@ -25,6 +26,8 @@ func associatedCommentRange(document *models.Document, entryIndex int) (int, int
 
 // makeCommentNodes создаёт по одному "# "-узлу на каждую LF-разделённую строку.
 // NUL и CR отклоняются, чтобы текст не создавал недопустимые байты или новые endings.
+// Каждая строка повторно разбирается parser-ом: entry-like text обязан дать ErrInvalidChange,
+// иначе NodeCommentedEntry создал бы ложные selector matches и нарушил associated range.
 func makeCommentNodes(text, ending string) ([]models.Node, error) {
 	if strings.ContainsAny(text, "\x00\r") {
 		return nil, ErrInvalidChange
@@ -32,7 +35,12 @@ func makeCommentNodes(text, ending string) ([]models.Node, error) {
 	lines := strings.Split(text, "\n")
 	nodes := make([]models.Node, len(lines))
 	for index, line := range lines {
-		nodes[index] = models.Node{Kind: models.NodeComment, Raw: "# " + line, Ending: ending}
+		parsed := parser.Parse([]byte("# " + line))
+		if len(parsed.Nodes) != 1 || parsed.Nodes[0].Kind != models.NodeComment || parsed.Nodes[0].Entry != nil {
+			return nil, ErrInvalidChange
+		}
+		nodes[index] = parsed.Nodes[0]
+		nodes[index].Ending = ending
 	}
 	return nodes, nil
 }

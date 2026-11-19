@@ -55,6 +55,20 @@ func TestSelectByLine(t *testing.T) {
 	}
 }
 
+// TestSelectByLineInvalidNode проверяет, что invalid physical line не считается записью,
+// а следующая активная строка сохраняет свой физический номер и zero-based index.
+func TestSelectByLineInvalidNode(t *testing.T) {
+	t.Parallel()
+
+	document := parser.Parse([]byte("не запись\nUUID=a /mnt/a ext4 defaults 0 0\n"))
+	if index, err := editor.Select(document, editor.ByLine(1)); index != -1 || !errors.Is(err, editor.ErrNotFound) {
+		t.Fatalf("invalid line: index=%d err=%v, want ErrNotFound", index, err)
+	}
+	if index, err := editor.Select(document, editor.ByLine(2)); err != nil || index != 1 {
+		t.Fatalf("следующая активная строка: index=%d err=%v, want index=1", index, err)
+	}
+}
+
 // TestSelectDecodedValues проверяет полное сравнение decoded source и mount,
 // а не поиск по escaped raw text или по подстроке.
 func TestSelectDecodedValues(t *testing.T) {
@@ -91,6 +105,17 @@ func TestSelectDecodedValues(t *testing.T) {
 				t.Fatalf("decoded selector: index=%d err=%v", index, err)
 			}
 		})
+	}
+	for _, test := range []struct {
+		name     string
+		selector editor.Selector
+	}{
+		{name: "raw escaped source не совпадает", selector: editor.BySource(`LABEL=My\040Disk`)},
+		{name: "raw escaped mount не совпадает", selector: editor.ByMountPoint(`/mnt/data\040disk`)},
+	} {
+		if index, err := editor.Select(escaped, test.selector); index != -1 || !errors.Is(err, editor.ErrNotFound) {
+			t.Errorf("%s: index=%d err=%v, want ErrNotFound", test.name, index, err)
+		}
 	}
 }
 

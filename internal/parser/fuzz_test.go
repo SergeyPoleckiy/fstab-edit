@@ -3,6 +3,8 @@ package parser_test
 
 import (
 	"bytes"
+	"errors"
+	"strings"
 	"testing"
 
 	"fstab-edit/internal/parser"
@@ -47,19 +49,30 @@ func FuzzRoundTrip(f *testing.F) {
 	})
 }
 
-// FuzzEncodeField проверяет, что каждое допустимое непустое decoded значение
-// после кодирования разбирается обратно в то же самое значение Source.
+// FuzzEncodeField проверяет decode/encode для каждого непустого decoded значения.
+// Ошибка допустима только как ErrInvalidField при фактических NUL/LF/CR; успешный
+// результат не может быть пустым или скрывать эти запрещённые байты во входе.
 func FuzzEncodeField(f *testing.F) {
 	f.Add("LABEL=My Disk")
 	f.Add("a\\b\tc")
 	f.Add("a\x00b")
 	f.Fuzz(func(t *testing.T, value string) {
-		encoded, err := parser.EncodeField(value)
-		if err != nil {
+		if value == "" {
 			return
 		}
-		if encoded == "" {
+		encoded, err := parser.EncodeField(value)
+		hasForbiddenByte := strings.ContainsAny(value, "\x00\n\r")
+		if err != nil {
+			if !errors.Is(err, parser.ErrInvalidField) || !hasForbiddenByte {
+				t.Fatalf("неожиданная ошибка: value=%q err=%v", value, err)
+			}
 			return
+		}
+		if hasForbiddenByte {
+			t.Fatalf("NUL/LF/CR приняты без ошибки: value=%q encoded=%q", value, encoded)
+		}
+		if encoded == "" {
+			t.Fatalf("непустое value дало пустой encoded: %q", value)
 		}
 		document := parser.Parse([]byte(encoded + " / ext4 defaults 0 0"))
 		if len(document.Nodes) != 1 || document.Nodes[0].Entry == nil {
