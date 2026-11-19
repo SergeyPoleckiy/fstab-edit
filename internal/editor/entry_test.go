@@ -454,3 +454,268 @@ func TestAddRejectsInvalidInputAtomically(t *testing.T) {
 		})
 	}
 }
+
+// TestAddAssociatedComment проверяет вставку комментария непосредственно перед
+// новой записью, разбиение LF на отдельные узлы и выбранный ending документа.
+func TestAddAssociatedComment(t *testing.T) {
+	t.Parallel()
+
+	input := []byte("# header\r\n# second header\r\n")
+	document := parser.Parse(input)
+	base := document.BaseSHA256
+	comment := "первая строка\nвторая строка"
+	changed, err := editor.Add(document, editor.NewEntry{
+		Source:     "UUID=a",
+		MountPoint: "/mnt/a",
+		FSType:     "ext4",
+		Options:    "defaults",
+		Comment:    &comment,
+	})
+	if err != nil || !changed {
+		t.Fatalf("add: changed=%v err=%v", changed, err)
+	}
+	want := []byte("# header\r\n# second header\r\n# первая строка\r\n# вторая строка\r\nUUID=a\t/mnt/a\text4\tdefaults\t0\t0\r\n")
+	if !bytes.Equal(document.Serialize(), want) {
+		t.Fatalf("associated comment:\ngot  %q\nwant %q", document.Serialize(), want)
+	}
+	if document.BaseSHA256 != base {
+		t.Fatal("add не должен пересчитывать base hash")
+	}
+}
+
+// TestAddCommentSeparatesPreviousLastLine проверяет, что отсутствующий ending
+// прежней последней строки добавляется перед comment nodes, а не после них.
+func TestAddCommentSeparatesPreviousLastLine(t *testing.T) {
+	t.Parallel()
+
+	document := parser.Parse([]byte("# header"))
+	comment := "associated"
+	changed, err := editor.Add(document, editor.NewEntry{
+		Source:     "UUID=a",
+		MountPoint: "/mnt/a",
+		FSType:     "ext4",
+		Options:    "defaults",
+		Comment:    &comment,
+	})
+	if err != nil || !changed {
+		t.Fatalf("add: changed=%v err=%v", changed, err)
+	}
+	want := "# header\n# associated\nUUID=a\t/mnt/a\text4\tdefaults\t0\t0\n"
+	if got := string(document.Serialize()); got != want {
+		t.Fatalf("add comment diff:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// TestEditAssociatedComment проверяет conservative замену непрерывного блока,
+// сохранение endings по индексу и вставку нового блока без затрагивания заголовка.
+func TestEditAssociatedComment(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name        string
+		input       string
+		comment     string
+		want        string
+		wantChanged bool
+	}{
+		{
+			// Два существующих ending должны быть переиспользованы по индексу при замене текста:
+			// case обнаруживает нормализацию CRLF/LF и замену более широкого диапазона документа.
+			name:        "замена multiline блока сохраняет endings",
+			input:       "# header\n\n# old one\r\n# old two\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			comment:     "new one\nnew two",
+			want:        "# header\n\n# new one\r\n# new two\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			wantChanged: true,
+		},
+		{
+			// Начальный comment block считается заголовком и не перезаписывается:
+			// case обнаруживает потерю заголовка вместо вставки нового associated block перед записью.
+			name:        "начальный заголовок не перезаписывается",
+			input:       "# header\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			comment:     "associated",
+			want:        "# header\n# associated\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			wantChanged: true,
+		},
+		{
+			// Blank line разрывает связь, поэтому standalone comment перед ней остаётся нетронутым:
+			// case обнаруживает сканирование через blank и удаление самостоятельного пояснения.
+			name:        "blank разрывает связь со standalone comment",
+			input:       "# standalone\n\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			comment:     "associated",
+			want:        "# standalone\n\n# associated\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			wantChanged: true,
+		},
+		{
+			// Совпадающий текст и переиспользованные endings образуют настоящий no-op:
+			// case обнаруживает ложный changed и нормализацию mixed endings при пересоздании узлов.
+			name:        "одинаковый multiline text является no-op",
+			input:       "# header\n\n# same\r\n# text\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			comment:     "same\ntext",
+			want:        "# header\n\n# same\r\n# text\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			wantChanged: false,
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			document := parser.Parse([]byte(test.input))
+			before := document.Serialize()
+			base := document.BaseSHA256
+			changed, err := editor.Edit(document, editor.ByLine(len(document.Nodes)), editor.Changes{Comment: &test.comment})
+			if err != nil || changed != test.wantChanged {
+				t.Fatalf("edit: changed=%v err=%v, want changed=%v", changed, err, test.wantChanged)
+			}
+			if got := string(document.Serialize()); got != test.want {
+				t.Fatalf("edit comment diff:\ngot  %q\nwant %q", got, test.want)
+			}
+			if !test.wantChanged {
+				assertUnchanged(t, document, before, base)
+			} else if document.BaseSHA256 != base {
+				t.Fatal("edit не должен пересчитывать base hash")
+			}
+		})
+	}
+}
+
+// TestEditClearAssociatedComment проверяет удаление только связанного блока
+// и no-op для заголовка, standalone comment после blank и записи без комментария.
+func TestEditClearAssociatedComment(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name        string
+		input       string
+		line        int
+		want        string
+		wantChanged bool
+	}{
+		{
+			name:        "связанный блок удаляется",
+			input:       "# header\n\n# associated one\r\n# associated two\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			line:        5,
+			want:        "# header\n\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			wantChanged: true,
+		},
+		{
+			name:        "начальный заголовок сохраняется",
+			input:       "# header one\n# header two\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			line:        3,
+			want:        "# header one\n# header two\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			wantChanged: false,
+		},
+		{
+			name:        "standalone после blank сохраняется",
+			input:       "# standalone\n\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			line:        3,
+			want:        "# standalone\n\nUUID=a /mnt/a ext4 defaults 0 0\n",
+			wantChanged: false,
+		},
+		{
+			name:        "отсутствие связанного блока является no-op",
+			input:       "UUID=a /mnt/a ext4 defaults 0 0\n",
+			line:        1,
+			want:        "UUID=a /mnt/a ext4 defaults 0 0\n",
+			wantChanged: false,
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			document := parser.Parse([]byte(test.input))
+			before := document.Serialize()
+			base := document.BaseSHA256
+			changed, err := editor.Edit(document, editor.ByLine(test.line), editor.Changes{ClearComment: true})
+			if err != nil || changed != test.wantChanged {
+				t.Fatalf("clear: changed=%v err=%v, want changed=%v", changed, err, test.wantChanged)
+			}
+			if got := string(document.Serialize()); got != test.want {
+				t.Fatalf("clear diff:\ngot  %q\nwant %q", got, test.want)
+			}
+			if !test.wantChanged {
+				assertUnchanged(t, document, before, base)
+			} else if document.BaseSHA256 != base {
+				t.Fatal("clear не должен пересчитывать base hash")
+			}
+		})
+	}
+}
+
+// TestEditInvalidCommentIsAtomic проверяет конфликт Comment/ClearComment и запрет
+// NUL/CR до commit, даже когда одновременно передано валидное изменение поля.
+func TestEditInvalidCommentIsAtomic(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name    string
+		comment *string
+		clear   bool
+	}{
+		{name: "Comment конфликтует с ClearComment", comment: stringPointer("text"), clear: true},
+		{name: "NUL в comment", comment: stringPointer("bad\x00text")},
+		{name: "CR в comment", comment: stringPointer("bad\rtext")},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			document := parser.Parse([]byte("# header\n\n# old\nUUID=a /mnt/a ext4 defaults 0 0\n"))
+			before := document.Serialize()
+			base := document.BaseSHA256
+			changed, err := editor.Edit(document, editor.ByLine(4), editor.Changes{
+				Options:      stringPointer("noatime"),
+				Comment:      test.comment,
+				ClearComment: test.clear,
+			})
+			if changed || !errors.Is(err, editor.ErrInvalidChange) {
+				t.Fatalf("changed=%v err=%v, want ErrInvalidChange", changed, err)
+			}
+			assertUnchanged(t, document, before, base)
+		})
+	}
+}
+
+// TestAddInvalidCommentIsAtomic проверяет отклонение NUL/CR в NewEntry.Comment
+// до добавления comment nodes или самой записи.
+func TestAddInvalidCommentIsAtomic(t *testing.T) {
+	t.Parallel()
+
+	for _, comment := range []string{"bad\x00text", "bad\rtext"} {
+		document := parser.Parse([]byte("# untouched\n"))
+		before := document.Serialize()
+		base := document.BaseSHA256
+		changed, err := editor.Add(document, editor.NewEntry{
+			Source:     "UUID=a",
+			MountPoint: "/mnt/a",
+			FSType:     "ext4",
+			Options:    "defaults",
+			Comment:    &comment,
+		})
+		if changed || !errors.Is(err, editor.ErrInvalidChange) {
+			t.Fatalf("comment=%q: changed=%v err=%v, want ErrInvalidChange", comment, changed, err)
+		}
+		assertUnchanged(t, document, before, base)
+	}
+}
+
+// TestDeletePreservesAssociatedComment отдельно фиксирует, что Delete удаляет
+// только entry node, а непосредственно связанный comment block остаётся в документе.
+func TestDeletePreservesAssociatedComment(t *testing.T) {
+	t.Parallel()
+
+	input := []byte("# header\n\n# associated one\r\n# associated two\nUUID=a /mnt/a ext4 defaults 0 0\nUUID=b /mnt/b ext4 defaults 0 0\n")
+	document := parser.Parse(input)
+	base := document.BaseSHA256
+	changed, err := editor.Delete(document, editor.ByLine(5))
+	if err != nil || !changed {
+		t.Fatalf("delete: changed=%v err=%v", changed, err)
+	}
+	want := []byte("# header\n\n# associated one\r\n# associated two\nUUID=b /mnt/b ext4 defaults 0 0\n")
+	if !bytes.Equal(document.Serialize(), want) {
+		t.Fatalf("delete diff:\ngot  %q\nwant %q", document.Serialize(), want)
+	}
+	if document.BaseSHA256 != base {
+		t.Fatal("delete не должен пересчитывать base hash")
+	}
+}

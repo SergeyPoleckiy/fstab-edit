@@ -1,7 +1,8 @@
-// Package editor_test содержит fuzz-проверку селекторов decoded значений.
+// Package editor_test содержит fuzz-проверки селекторов и round-trip мутаций.
 package editor_test
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 
@@ -55,6 +56,63 @@ func FuzzSelect(f *testing.F) {
 			if got := test.field(entry); got != value {
 				t.Fatalf("неточное совпадение: got %q, want %q", got, value)
 			}
+		}
+	})
+}
+
+// FuzzCommentRoundTrip выбирает первую активную запись и проверяет, что успешный
+// Comment → Uncomment по той же physical line восстанавливает исходные байты.
+// Ошибка conservative classification допустима, но не должна изменить документ.
+func FuzzCommentRoundTrip(f *testing.F) {
+	f.Add([]byte("UUID=a /mnt/a ext4 defaults 0 0\n"))
+	f.Add([]byte("  LABEL=A\\040B\t/mnt/a  ext4\tdefaults 0 1\r\n# tail\n"))
+	f.Add([]byte("UUID=a relative/mount ext4 defaults 0 0\n"))
+	f.Add([]byte("# header\nUUID=a /mnt/a ext4 defaults\nUUID=b /mnt/b ext4 defaults 0 2"))
+
+	f.Fuzz(func(t *testing.T, input []byte) {
+		document := parser.Parse(input)
+		if document == nil {
+			t.Fatal("parser вернул nil document")
+		}
+		line := 0
+		for index, node := range document.Nodes {
+			if node.Kind == models.NodeEntry {
+				line = index + 1
+				break
+			}
+		}
+		if line == 0 {
+			return
+		}
+
+		before := document.Serialize()
+		base := document.BaseSHA256
+		changed, err := editor.Comment(document, editor.ByLine(line))
+		if err != nil {
+			if changed {
+				t.Fatal("Comment вернул changed=true вместе с ошибкой")
+			}
+			if !bytes.Equal(document.Serialize(), before) {
+				t.Fatalf("Comment изменил документ после ошибки:\ngot  %q\nwant %q", document.Serialize(), before)
+			}
+			if document.BaseSHA256 != base {
+				t.Fatal("Comment изменил base hash после ошибки")
+			}
+			return
+		}
+		if !changed {
+			t.Fatal("успешный Comment обязан изменить активную запись")
+		}
+
+		changed, err = editor.Uncomment(document, editor.ByLine(line))
+		if err != nil || !changed {
+			t.Fatalf("Uncomment после Comment: changed=%v err=%v", changed, err)
+		}
+		if !bytes.Equal(document.Serialize(), before) {
+			t.Fatalf("round-trip не восстановил документ:\ngot  %q\nwant %q", document.Serialize(), before)
+		}
+		if document.BaseSHA256 != base {
+			t.Fatal("round-trip изменил base hash")
 		}
 	})
 }

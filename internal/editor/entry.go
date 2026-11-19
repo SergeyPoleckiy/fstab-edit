@@ -14,7 +14,8 @@ import (
 )
 
 // NewEntry содержит decoded значения всех полей новой записи fstab.
-// Пустые Dump и Pass заменяются стандартным значением "0".
+// Пустые Dump и Pass заменяются стандартным значением "0". Comment задаёт
+// необязательный связанный comment block, вставляемый непосредственно перед записью.
 type NewEntry struct {
 	Source     string
 	MountPoint string
@@ -22,19 +23,24 @@ type NewEntry struct {
 	Options    string
 	Dump       string
 	Pass       string
+	Comment    *string
 }
 
 // Changes описывает только явно запрошенные изменения записи. Nil означает, что
 // поле сохраняется; UnsetDump и UnsetPass удаляют соответствующее optional-поле.
+// Comment заменяет связанный block, а ClearComment удаляет его; одновременное
+// использование этих полей запрещено. Начальный заголовок документа сохраняется.
 type Changes struct {
-	Source     *string
-	MountPoint *string
-	FSType     *string
-	Options    *string
-	Dump       *string
-	Pass       *string
-	UnsetDump  bool
-	UnsetPass  bool
+	Source       *string
+	MountPoint   *string
+	FSType       *string
+	Options      *string
+	Dump         *string
+	Pass         *string
+	Comment      *string
+	UnsetDump    bool
+	UnsetPass    bool
+	ClearComment bool
 }
 
 // replacement задаёт замену byte range в исходной Node.Raw. Start == End
@@ -87,30 +93,42 @@ func Add(document *models.Document, input NewEntry) (bool, error) {
 		encoded[index] = raw
 	}
 
-	candidate := cloneDocument(document)
 	ending := dominantEnding(document)
+	var comments []models.Node
+	if input.Comment != nil {
+		var err error
+		comments, err = makeCommentNodes(*input.Comment, ending)
+		if err != nil {
+			return false, err
+		}
+	}
+
+	candidate := cloneDocument(document)
 	// Новая физическая строка должна быть отделена от прежнего последнего узла,
 	// даже если исходный документ заканчивался без newline.
 	if len(candidate.Nodes) > 0 && candidate.Nodes[len(candidate.Nodes)-1].Ending == "" {
 		candidate.Nodes[len(candidate.Nodes)-1].Ending = ending
 	}
-	node, err := rebuildNode(strings.Join(encoded, "\t"), ending, len(candidate.Nodes)+1, models.NodeEntry)
+	line := len(candidate.Nodes) + len(comments) + 1
+	node, err := rebuildNode(strings.Join(encoded, "\t"), ending, line, models.NodeEntry)
 	if err != nil {
 		return false, err
 	}
+	candidate.Nodes = append(candidate.Nodes, comments...)
 	candidate.Nodes = append(candidate.Nodes, node)
 	return commitDocument(document, candidate), nil
 }
 
-// Edit применяет changes к записи document, однозначно выбранной через selector,
-// и заменяет только raw ranges изменённых полей, сохраняя separators, escapes и endings.
+// Edit применяет changes к записи document, однозначно выбранной через selector.
+// Поля заменяются точечными raw ranges с сохранением separators, escapes и endings;
+// Comment и ClearComment изменяют только conservative associated comment block.
 // Возвращаемый bool равен true при изменении сериализованных байтов; false с nil означает
-// no-op, включая передачу decoded значения, равного текущему. Ошибки Select возвращаются
-// без изменений; ErrWrongState обозначает неподходящий узел, ErrInvalidChange — конфликт
-// или недопустимый набор changes, ErrEmptyField — пустое явно заданное значение. Ошибки
-// parser.EncodeField и пересборки также не коммитятся. Успешный вызов заменяет выбранный
-// Node и пересчитывает Entry.Line при необходимости; BaseSHA256 сохраняется. Ввод-вывод
-// не выполняется, все побочные эффекты ограничены переданным document.
+// no-op, включая передачу decoded значения или comment text, равного текущему. Ошибки Select
+// возвращаются без изменений; ErrWrongState обозначает неподходящий узел, ErrInvalidChange —
+// конфликт или недопустимый набор changes, ErrEmptyField — пустое явно заданное поле. Ошибки
+// parser.EncodeField и пересборки также не коммитятся. Успешный вызов пересчитывает Entry.Line
+// при необходимости; BaseSHA256 сохраняется. Ввод-вывод не выполняется, все побочные эффекты
+// ограничены переданным document.
 func Edit(document *models.Document, selector Selector, changes Changes) (bool, error) {
 	index, err := Select(document, selector)
 	if err != nil {
@@ -217,19 +235,45 @@ func Edit(document *models.Document, selector Selector, changes Changes) (bool, 
 		})
 	}
 
+	ending := dominantEnding(document)
+	var comments []models.Node
+	if changes.Comment != nil {
+		comments, err = makeCommentNodes(*changes.Comment, ending)
+		if err != nil {
+			return false, err
+		}
+	}
+
 	candidate := cloneDocument(document)
 	changedNode, err := rebuildNode(replaceRanges(node.Raw, replacements), node.Ending, index+1, node.Kind)
 	if err != nil {
 		return false, err
 	}
 	candidate.Nodes[index] = changedNode
+	if changes.Comment != nil {
+		start, end := associatedCommentRange(candidate, index)
+		for commentIndex := range comments {
+			if start+commentIndex < end {
+				comments[commentIndex].Ending = candidate.Nodes[start+commentIndex].Ending
+			}
+		}
+		nodes := make([]models.Node, 0, len(candidate.Nodes)-(end-start)+len(comments))
+		nodes = append(nodes, candidate.Nodes[:start]...)
+		nodes = append(nodes, comments...)
+		nodes = append(nodes, candidate.Nodes[end:]...)
+		candidate.Nodes = nodes
+	} else if changes.ClearComment {
+		start, end := associatedCommentRange(candidate, index)
+		candidate.Nodes = append(candidate.Nodes[:start], candidate.Nodes[end:]...)
+	}
 	return commitDocument(document, candidate), nil
 }
 
 // validateChanges отклоняет противоречивые set/unset, пустой набор изменений
 // и пустые значения всех явно переданных полей до кодирования и копирования.
 func validateChanges(changes Changes) error {
-	if (changes.Dump != nil && changes.UnsetDump) || (changes.Pass != nil && changes.UnsetPass) {
+	if (changes.Dump != nil && changes.UnsetDump) || (changes.Pass != nil && changes.UnsetPass) ||
+		(changes.Comment != nil && changes.ClearComment) {
 		return ErrInvalidChange
 	}
 	values := []*string{
@@ -240,7 +284,7 @@ func validateChanges(changes Changes) error {
 		changes.Dump,
 		changes.Pass,
 	}
-	hasChange := changes.UnsetDump || changes.UnsetPass
+	hasChange := changes.UnsetDump || changes.UnsetPass || changes.Comment != nil || changes.ClearComment
 	for _, value := range values {
 		if value == nil {
 			continue
