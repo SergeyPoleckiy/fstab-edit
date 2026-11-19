@@ -327,22 +327,22 @@ Expected: FAIL, функция отсутствует.
 
 - [ ] **Step 2: Реализовать candidate.go**
 
-Создать `os.MkdirTemp("", "fstab-edit-candidate-*")` (MkdirTemp создаёт 0700), затем `filepath.Join(dir, "candidate.fstab")` и `os.WriteFile(..., 0600)`. Не добавлять newline и не нормализовать bytes. Вызвать `NewFindmntVerifier(runner).Verify(ctx, path)` только после успешной записи.
+Создать `os.MkdirTemp("", "fstab-edit-candidate-*")` (MkdirTemp создаёт 0700), затем получить абсолютный путь через `filepath.Abs`, чтобы относительный `TMPDIR` не нарушал absolute path contract. Использовать абсолютный directory для `filepath.Join(dir, "candidate.fstab")`, `os.WriteFile(..., 0600)`, runner и cleanup. Не добавлять newline и не нормализовать bytes. Вызвать `NewFindmntVerifier(runner).Verify(ctx, path)` только после успешной записи.
 
 Ошибки create/write возвращают Verification с `findmnt.candidate/error`, Execution.ExitCode=-1 и Err; Document/candidate не затрагиваются. Не включать temp path или file contents в Diagnostic.
 
-Использовать named return и defer RemoveAll: после основной проверки удалить весь private dir. При ошибке cleanup добавить `findmnt.candidate_cleanup/warning` и сохранить первичный Report/Execution.Err. Cleanup error не должен перезаписывать первичную ошибку. При ошибке записи тоже попытаться удалить dir.
+Использовать named return и defer RemoveAll: после основной проверки предпринять попытку удалить весь private dir. При ошибке cleanup добавить `findmnt.candidate_cleanup/warning` и сохранить первичный Report/Execution.Err. Cleanup error не должен перезаписывать первичную ошибку. При ошибке записи тоже предпринять попытку удалить dir; успешное удаление не является безусловной гарантией.
 
 - [ ] **Step 3: Добавить fuzz классификатора**
 
-В package `sysutil` создать `FuzzClassifyFindmnt(stdout, stderr string, exitCode int)`. Нормализовать exit code к -1/0/1 только в seed wrapper не нужно: classifier обязан выдержать любой int. Установить Err nil и truncation false. Перед вызовом обернуть fuzz strings в устойчивые маркеры `sensitiveStdout := "do-not-leak-stdout:" + stdout` и `sensitiveStderr := "do-not-leak-stderr:" + stderr`; именно эти полные значения передать classifier и искать в JSON Report.
+В package `sysutil` создать `FuzzClassifyFindmnt(stdout, stderr string, exitCode int)`. Нормализовать exit code к -1/0/1 только в seed wrapper не нужно: classifier обязан выдержать любой int. Установить Err nil и truncation false. Перед вызовом обернуть fuzz strings в устойчивые маркеры `sensitiveStdout := "do-not-leak-stdout:" + stdout` и `sensitiveStderr := "do-not-leak-stderr:" + stderr`; полные значения передать classifier, а в JSON Report искать устойчивые prefixes `do-not-leak-stdout:` и `do-not-leak-stderr:`, чтобы экранирование кавычек, backslash и newline не обходило проверку. Добавить соответствующий seed.
 
 Инварианты:
 
 - no panic; Report.Diagnostics non-nil;
 - два вызова `classifyFindmnt` дают reflect.DeepEqual;
 - Code/Message непустые, Severity только error/warning/info;
-- JSON Report не содержит полные `sensitiveStdout`/`sensitiveStderr`, поскольку classifier не копирует output; маркерный prefix исключает случайные совпадения с короткими numeric diagnostics;
+- JSON Report не содержит marker prefixes, поскольку classifier не копирует output; поиск prefix не зависит от JSON-экранирования остального sensitive value;
 - если любая stdout line после TrimSpace начинается с `[E]` и exit любой, HasErrors true; если exit 0 и output только пустой/success summary, HasErrors false;
 - raw Execution остаётся отдельной от Report ответственностью Verify, fuzz не сериализует Execution как безопасный для логов объект.
 

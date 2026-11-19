@@ -29,6 +29,7 @@ func FuzzClassifyFindmnt(f *testing.F) {
 		{stdout: "\xff\x00[E] invalid UTF-8", stderr: "\xfe parse error at line 999999999999999999999", exitCode: -1},
 		{stdout: "999999999999999999999 parse errors, 999999999999999999999 errors, 999999999999999999999 warnings", stderr: "", exitCode: 0},
 		{stdout: "\n\t[E] after blank\n", stderr: "", exitCode: -2147483648},
+		{stdout: "quote \" backslash \\ newline\nnext stdout", stderr: "quote \" backslash \\ newline\nnext stderr", exitCode: 0},
 		{stdout: "", stderr: "", exitCode: 2147483647},
 	}
 	for _, seed := range seeds {
@@ -68,8 +69,10 @@ func FuzzClassifyFindmnt(f *testing.F) {
 			t.Fatalf("Report не сериализуется: %v", err)
 		}
 		encoded := string(serialized)
-		if strings.Contains(encoded, sensitiveStdout) || strings.Contains(encoded, sensitiveStderr) {
-			t.Fatalf("Report раскрывает маркерный raw output: %s", encoded)
+		for _, prefix := range []string{"do-not-leak-stdout:", "do-not-leak-stderr:"} {
+			if strings.Contains(encoded, prefix) {
+				t.Fatalf("Report раскрывает маркерный raw output с prefix %q: %s", prefix, encoded)
+			}
 		}
 
 		hasErrorLine := false

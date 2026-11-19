@@ -24,9 +24,10 @@ var (
 )
 
 // VerifyCandidate объединяет внутреннюю валидацию и внешнюю проверку candidate.
-// Runner получает только findmnt --verify --tab-file с путём к временному файлу:
-// функция не монтирует ресурсы и никогда не обращается к /etc/fstab. Исходный
-// candidate slice не изменяется, а private directory удаляется при любом исходе.
+// Runner получает только findmnt --verify --tab-file с абсолютным путём к
+// временному файлу: функция не монтирует ресурсы и никогда не обращается к
+// /etc/fstab. Исходный candidate slice не изменяется. После создания private
+// directory RemoveAll предпринимается при любом исходе; ошибка cleanup добавляет warning.
 func VerifyCandidate(ctx context.Context, runner CommandRunner, candidate []byte) (verification Verification) {
 	directory, err := candidateMkdirTemp("", "fstab-edit-candidate-*")
 	if err != nil {
@@ -41,6 +42,10 @@ func VerifyCandidate(ctx context.Context, runner CommandRunner, candidate []byte
 		}
 	}()
 
+	directory, err = filepath.Abs(directory)
+	if err != nil {
+		return candidatePreparationFailure(err)
+	}
 	path := filepath.Join(directory, "candidate.fstab")
 	if err := candidateWriteFile(path, candidate, 0o600); err != nil {
 		return candidatePreparationFailure(err)

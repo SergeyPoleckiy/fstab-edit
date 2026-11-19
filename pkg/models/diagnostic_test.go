@@ -3,6 +3,7 @@ package models_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"fstab-edit/pkg/models"
@@ -127,50 +128,34 @@ func TestMergeReportsPreservesOrderAndHasErrors(t *testing.T) {
 }
 
 // TestMergeReportsDoesNotShareSourceArrays проверяет копирование элементов и
-// отсутствие общего backing array даже при запасе capacity у исходных slices.
+// неизменность merged при последующем append к source slices с запасом capacity.
 func TestMergeReportsDoesNotShareSourceArrays(t *testing.T) {
 	t.Parallel()
 
 	internalDiagnostics := make([]models.Diagnostic, 1, 4)
 	internalDiagnostics[0] = models.Diagnostic{Code: "internal.error", Severity: models.SeverityError, Message: "Исходная ошибка"}
-	internalDiagnostics[:2][1] = models.Diagnostic{Code: "internal.sentinel"}
 	externalDiagnostics := make([]models.Diagnostic, 1, 4)
 	externalDiagnostics[0] = models.Diagnostic{Code: "external.warning", Severity: models.SeverityWarning, Message: "Исходное предупреждение"}
-	externalDiagnostics[:2][1] = models.Diagnostic{Code: "external.sentinel"}
 	internal := models.Report{Diagnostics: internalDiagnostics}
 	external := models.Report{Diagnostics: externalDiagnostics}
-	beforeInternal, err := json.Marshal(internal)
-	if err != nil {
-		t.Fatal(err)
-	}
-	beforeExternal, err := json.Marshal(external)
-	if err != nil {
-		t.Fatal(err)
-	}
+	originalInternal := models.Report{Diagnostics: append([]models.Diagnostic(nil), internal.Diagnostics...)}
+	originalExternal := models.Report{Diagnostics: append([]models.Diagnostic(nil), external.Diagnostics...)}
 
 	merged := models.MergeReports(internal, external)
-	merged.Diagnostics[0].Code = "merged.changed"
-	merged.Diagnostics = append(merged.Diagnostics,
-		models.Diagnostic{Code: "merged.added", Severity: models.SeverityInfo, Message: "Новая диагностика"})
+	merged.Diagnostics[0].Code = "merged.internal.changed"
+	merged.Diagnostics[1].Code = "merged.external.changed"
 
-	afterInternal, err := json.Marshal(internal)
-	if err != nil {
-		t.Fatal(err)
+	if !reflect.DeepEqual(internal, originalInternal) {
+		t.Fatalf("internal изменился через merged:\ngot  %+v\nwant %+v", internal, originalInternal)
 	}
-	afterExternal, err := json.Marshal(external)
-	if err != nil {
-		t.Fatal(err)
+	if !reflect.DeepEqual(external, originalExternal) {
+		t.Fatalf("external изменился через merged:\ngot  %+v\nwant %+v", external, originalExternal)
 	}
-	if string(afterInternal) != string(beforeInternal) {
-		t.Fatalf("internal изменился через merged:\nbefore %s\nafter  %s", beforeInternal, afterInternal)
-	}
-	if string(afterExternal) != string(beforeExternal) {
-		t.Fatalf("external изменился через merged:\nbefore %s\nafter  %s", beforeExternal, afterExternal)
-	}
-	if got := internalDiagnostics[:2][1].Code; got != "internal.sentinel" {
-		t.Fatalf("append в merged перезаписал internal backing array: %q", got)
-	}
-	if got := externalDiagnostics[:2][1].Code; got != "external.sentinel" {
-		t.Fatalf("append в merged перезаписал external backing array: %q", got)
+
+	mergedBeforeSourceAppends := append([]models.Diagnostic(nil), merged.Diagnostics...)
+	internal.Diagnostics = append(internal.Diagnostics, models.Diagnostic{Code: "internal.added"})
+	external.Diagnostics = append(external.Diagnostics, models.Diagnostic{Code: "external.added"})
+	if !reflect.DeepEqual(merged.Diagnostics, mergedBeforeSourceAppends) {
+		t.Fatalf("append к source slices изменил merged:\ngot  %+v\nwant %+v", merged.Diagnostics, mergedBeforeSourceAppends)
 	}
 }

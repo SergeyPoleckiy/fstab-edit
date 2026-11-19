@@ -171,6 +171,39 @@ func TestVerifyCandidateLifecycle(t *testing.T) {
 	assertCandidateReportRedacted(t, verification)
 }
 
+// TestVerifyCandidateRelativeTempDirUsesAbsolutePath проверяет absolute path
+// contract при относительном TMPDIR, неизменные bytes и cleanup через fake runner.
+func TestVerifyCandidateRelativeTempDirUsesAbsolutePath(t *testing.T) {
+	tempRoot := isolateCandidateTemp(t)
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relativeRoot, err := filepath.Rel(workingDirectory, tempRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.IsAbs(relativeRoot) {
+		t.Fatalf("test TMPDIR должен быть относительным: %q", relativeRoot)
+	}
+	t.Setenv("TMPDIR", relativeRoot)
+	candidate := []byte("/dev/sda /mnt/data ext4 defaults 0 0")
+	execution := RunResult{Path: "/usr/bin/findmnt", ExitCode: 0}
+	runner := newCandidateInspectingRunner(t, tempRoot, candidate, execution)
+
+	verification := VerifyCandidate(context.Background(), runner, candidate)
+
+	if runner.path == "" || !filepath.IsAbs(runner.path) {
+		t.Errorf("args[2] при относительном TMPDIR: got %q, want absolute path", runner.path)
+	}
+	if !reflect.DeepEqual(verification.Execution, execution) {
+		t.Fatalf("Execution изменён:\ngot  %+v\nwant %+v", verification.Execution, execution)
+	}
+	assertFindmntCodes(t, verification.Report)
+	assertCandidateCleanup(t, runner)
+	assertCandidateReportRedacted(t, verification)
+}
+
 // TestVerifyCandidateEmpty проверяет, что пустой вход не заменяется newline или
 // другим содержимым и всё равно проходит внешнюю проверку с последующим cleanup.
 func TestVerifyCandidateEmpty(t *testing.T) {

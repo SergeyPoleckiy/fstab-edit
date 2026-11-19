@@ -113,7 +113,8 @@ func TestFindmntVerifyArgvAndExecution(t *testing.T) {
 	}
 	runner := &fakeFindmntRunner{result: execution}
 	verifier := NewFindmntVerifier(runner)
-	ctx := context.WithValue(context.Background(), struct{}{}, "test context")
+	type findmntContextKey struct{}
+	ctx := context.WithValue(context.Background(), findmntContextKey{}, "test context")
 	candidate := "/tmp/candidate --verify with spaces"
 
 	verification := verifier.Verify(ctx, candidate)
@@ -303,9 +304,10 @@ func TestFindmntVerifySummaryFallbacks(t *testing.T) {
 }
 
 // TestFindmntVerifyNonzeroWarningsAddsFailure проверяет объяснение необъяснённого
-// ненулевого exit отдельной ошибкой даже при наличии warnings.
+// ненулевого exit отдельной ошибкой даже при наличии warnings. ExitError
+// воспроизводит состоявшийся запуск без выполнения реального процесса.
 func TestFindmntVerifyNonzeroWarningsAddsFailure(t *testing.T) {
-	execution := RunResult{ExitCode: 7, Stdout: "0 parse errors, 0 errors, 1 warnings\nnone\n   [W] sensitive warning\n"}
+	execution := RunResult{ExitCode: 7, Stdout: "0 parse errors, 0 errors, 1 warnings\nnone\n   [W] sensitive warning\n", Err: &exec.ExitError{}}
 	verification := NewFindmntVerifier(&fakeFindmntRunner{result: execution}).Verify(context.Background(), "/private/candidate")
 
 	assertFindmntCodes(t, verification.Report, "findmnt.warning/warning", "findmnt.failed/error")
@@ -319,7 +321,7 @@ func TestFindmntVerifyNonzeroWarningsAddsFailure(t *testing.T) {
 // TestFindmntVerifyNonzeroWithoutOutput проверяет numeric exit_code и отсутствие
 // argv, candidate path и технических raw details в сообщении generic failure.
 func TestFindmntVerifyNonzeroWithoutOutput(t *testing.T) {
-	execution := RunResult{ExitCode: 19}
+	execution := RunResult{ExitCode: 19, Err: &exec.ExitError{}}
 	verification := NewFindmntVerifier(&fakeFindmntRunner{result: execution}).Verify(context.Background(), "/private/candidate --verify")
 
 	assertFindmntCodes(t, verification.Report, "findmnt.failed/error")
