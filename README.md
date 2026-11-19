@@ -17,7 +17,7 @@
 - Реализованы `findmnt --verify --tab-file` и private candidate check. Содержимое кандидата записывается без нормализации и добавления newline в файл `0600` внутри временного каталога `0700`; после проверки предпринимается попытка `RemoveAll` при любом исходе. Ошибка удаления добавляет `findmnt.candidate_cleanup/warning`, сохраняя первичные diagnostics и `Execution.Err`. Внутренний validator и внешний отчёт объединяются в порядке internal → external.
 - Классификация вывода проверена на fixtures наблюдённого формата **util-linux 2.42.4**. `findmnt` только статически проверяет файл-кандидат и ничего не монтирует.
 - Raw stdout/stderr потенциально содержат sensitive-данные и не предназначены для записи в журнал без redaction; публичный `Report` содержит только обобщённые диагностики, а исходный вывод хранится отдельно в `Execution`.
-- Transaction ещё не вызывает verifier; lock/writer/backup и CLI остаются следующими задачами. Текущие операции не изменяют `/etc/fstab`.
+- Реализованы secure snapshot/base-hash conflict, стабильные flock и низкоуровневый атомарный `Replace` с сохранением metadata/xattrs. Backup, sidecar, automatic rollback, transaction и CLI ещё не подключены; тесты writer работают только с временными файлами и не изменяют реальный `/etc/fstab`.
 - Актуальная основа разработки: [ТЗ версии 2.0](../fstab-editor-v2.md).
 - Исходная редакция сохранена: [ТЗ версии 1.0](../fstab-editor.md).
 
@@ -71,14 +71,13 @@ golangci-lint run
 
 ## Документация по безопасности
 
-Основные гарантии:
+Текущие гарантии низкоуровневого writer:
 
-1. Перед записью создаётся проверенная резервная копия.
-2. Проверка выполняется по файлу-кандидату до изменения оригинала.
-3. Запись выполняется атомарно.
-4. Конфликт с внешним изменением файла запрещает перезапись.
-5. Ошибка после записи вызывает rollback копии текущей транзакции.
-6. Резервная копия гарантирует восстановление исходных байтов, но не работоспособность уже повреждённой исходной конфигурации.
+1. `ReadSnapshot` читает точные байты только из безопасно открытого regular-file descriptor. `VerifyBaseHash` повторно читает target и обнаруживает внешнее изменение по SHA-256, даже если size и mtime не изменились; read-only API не создают lock.
+2. Lock создаётся только явным `AcquireLock` в отдельном стабильном файле, имя которого содержит SHA-256 canonical target. Проверяются владелец и modes каталога `0700` и файла `0600`; используются защищённые system/XDG/cache-каталоги. Стандартный timeout ожидания — **10 секунд**. Библиотека не удерживает lock во время prompt: его lifetime принадлежит будущей transaction.
+3. `Replace` записывает candidate в temp `0600` в parent directory, затем строго выполняет `fchown` → `fchmod` → копирование xattrs через descriptors → file sync → file close → rename → directory sync → повторное чтение и проверку SHA-256. До успешного rename ошибка оставляет target старым и запускает cleanup temp; cleanup errors присоединяются через `errors.Join` без потери первичной причины.
+4. UID/GID, permission bits и доступные xattrs, включая zero-length values, сохраняются. Ошибка чтения или установки конкретного security xattr запрещает replace. SELinux/AppArmor policy не изменяется; enforcing VM test остаётся отдельной release-проверкой и не считается выполненным на обычной temp FS.
+5. Ошибка directory sync или post-rename verification возвращается с `ReplaceResult.Replaced=true`. Низкоуровневый writer не выполняет automatic rollback: будущая transaction обязана при `err != nil && result.Replaced` восстановить backup текущей операции. При `Replaced=false` target считается неизменённым.
 
 ## Лицензия
 
