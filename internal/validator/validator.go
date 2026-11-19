@@ -2,7 +2,11 @@
 // записей fstab. Он не обращается к среде, файлам и внешним командам.
 package validator
 
-import "fstab-edit/pkg/models"
+import (
+	"strconv"
+
+	"fstab-edit/pkg/models"
+)
 
 // collector накапливает diagnostics в порядке обхода документа и правил.
 type collector struct {
@@ -49,5 +53,49 @@ func Validate(document *models.Document) models.Report {
 			// Отключённые записи и служебные узлы не влияют на конфигурацию.
 		}
 	}
+	validateDuplicates(collector, document)
 	return collector.report
+}
+
+// validateDuplicates сравнивает decoded mount/source только активных записей.
+// Физический номер строки берётся из позиции узла, поэтому comments и blank
+// lines корректно учитываются, а NodeCommentedEntry в обход не попадает.
+func validateDuplicates(collector *collector, document *models.Document) {
+	firstMount := make(map[string]int)
+	firstSource := make(map[string]int)
+	for index, node := range document.Nodes {
+		if node.Kind != models.NodeEntry || node.Entry == nil {
+			continue
+		}
+		line := index + 1
+		checkDuplicate(collector, firstMount, node.Entry.MountPoint.Value, line, "mount_point", "duplicate.mount", models.SeverityError)
+		checkDuplicate(collector, firstSource, node.Entry.Source.Value, line, "source", "duplicate.source", models.SeverityWarning)
+	}
+}
+
+// checkDuplicate сохраняет первую строку для каждого непустого decoded value.
+// Source никогда не копируется в Diagnostic; mount считается безопасным Value.
+func checkDuplicate(collector *collector, firstLines map[string]int, value string, line int, field, code string, severity models.Severity) {
+	if value == "" {
+		return
+	}
+	firstLine, exists := firstLines[value]
+	if !exists {
+		firstLines[value] = line
+		return
+	}
+
+	diagnostic := models.Diagnostic{
+		Code:     code,
+		Severity: severity,
+		Line:     line,
+		Field:    field,
+		Message:  "Источник повторяется в активных записях",
+		Params:   map[string]string{"first_line": strconv.Itoa(firstLine)},
+	}
+	if field == "mount_point" {
+		diagnostic.Value = value
+		diagnostic.Message = "Точка монтирования повторяется в активных записях"
+	}
+	collector.add(diagnostic)
 }

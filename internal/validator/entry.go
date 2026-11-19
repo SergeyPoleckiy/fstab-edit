@@ -24,6 +24,8 @@ func validateEntry(collector *collector, entry *models.Entry) {
 	validateFSType(collector, entry)
 
 	validateField(collector, entry.Line, "options", entry.Options, true)
+	validateOptions(collector, entry)
+	validateSpecial(collector, entry)
 
 	if entry.Dump != nil {
 		validateField(collector, entry.Line, "dump", *entry.Dump, false)

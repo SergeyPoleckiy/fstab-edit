@@ -166,19 +166,19 @@ func TestControls(t *testing.T) {
 		want  []string
 	}{
 		// Литеральный NUL в raw source должен блокировать сохранение.
-		{name: "raw NUL", input: "LABEL=A\x00B / ext4 defaults 0 0", want: []string{"error:field.control"}},
+		{name: "raw NUL", input: "LABEL=A\x00B /mnt/data ext4 defaults 0 0", want: []string{"error:field.control"}},
 		// Другой литеральный C0 control также недопустим в исходном поле.
-		{name: "raw C0 control", input: "LABEL=A\x01B / ext4 defaults 0 0", want: []string{"error:field.control"}},
+		{name: "raw C0 control", input: "LABEL=A\x01B /mnt/data ext4 defaults 0 0", want: []string{"error:field.control"}},
 		// DEL относится к control bytes наряду с диапазоном ниже 0x20.
-		{name: "raw DEL", input: "LABEL=A\x7fB / ext4 defaults 0 0", want: []string{"error:field.control"}},
+		{name: "raw DEL", input: "LABEL=A\x7fB /mnt/data ext4 defaults 0 0", want: []string{"error:field.control"}},
 		// Octal NUL обнаруживается уже в decoded Value и остаётся error.
-		{name: "decoded NUL", input: `LABEL=A\000B / ext4 defaults 0 0`, want: []string{"error:field.control"}},
+		{name: "decoded NUL", input: `LABEL=A\000B /mnt/data ext4 defaults 0 0`, want: []string{"error:field.control"}},
 		// Escaped tab разрешён ТЗ и не должен порождать control diagnostic.
-		{name: "escaped tab", input: `LABEL=A\011B / ext4 defaults 0 0`, want: []string{}},
+		{name: "escaped tab", input: `LABEL=A\011B /mnt/data ext4 defaults 0 0`, want: []string{}},
 		// Иной escaped control не NUL сообщается как warning, а не error.
-		{name: "escaped C0 control", input: `LABEL=A\001B / ext4 defaults 0 0`, want: []string{"warning:field.control_escaped"}},
+		{name: "escaped C0 control", input: `LABEL=A\001B /mnt/data ext4 defaults 0 0`, want: []string{"warning:field.control_escaped"}},
 		// Escaped DEL проходит тот же путь decoded control warning.
-		{name: "escaped DEL", input: `LABEL=A\177B / ext4 defaults 0 0`, want: []string{"warning:field.control_escaped"}},
+		{name: "escaped DEL", input: `LABEL=A\177B /mnt/data ext4 defaults 0 0`, want: []string{"warning:field.control_escaped"}},
 	}
 	for _, test := range cases {
 		test := test
@@ -206,17 +206,17 @@ func TestEscapes(t *testing.T) {
 		want  []string
 	}{
 		// Неизвестная буква после backslash должна дать warning без потери raw.
-		{name: "unknown escape", input: `LABEL=A\qB / ext4 defaults 0 0`, want: []string{"warning:escape.unknown"}},
+		{name: "unknown escape", input: `LABEL=A\qB /mnt/data ext4 defaults 0 0`, want: []string{"warning:escape.unknown"}},
 		// Две octal digits не образуют трёхзначный escape и тоже диагностируются.
-		{name: "incomplete octal", input: `LABEL=A\04 / ext4 defaults 0 0`, want: []string{"warning:escape.unknown"}},
+		{name: "incomplete octal", input: `LABEL=A\04 /mnt/data ext4 defaults 0 0`, want: []string{"warning:escape.unknown"}},
 		// Пространство внутри значения кодируется штатным escape \040.
-		{name: "space", input: `LABEL=A\040B / ext4 defaults 0 0`, want: []string{}},
+		{name: "space", input: `LABEL=A\040B /mnt/data ext4 defaults 0 0`, want: []string{}},
 		// Табуляция кодируется \011 и одновременно разрешена control-проверкой.
-		{name: "tab", input: `LABEL=A\011B / ext4 defaults 0 0`, want: []string{}},
+		{name: "tab", input: `LABEL=A\011B /mnt/data ext4 defaults 0 0`, want: []string{}},
 		// Backslash кодируется \134 и не должен повторно трактоваться как escape.
-		{name: "backslash", input: `LABEL=A\134B / ext4 defaults 0 0`, want: []string{}},
+		{name: "backslash", input: `LABEL=A\134B /mnt/data ext4 defaults 0 0`, want: []string{}},
 		// Произвольный трёхзначный octal \041 также допустим по алгоритму brief.
-		{name: "generic octal", input: `LABEL=A\041B / ext4 defaults 0 0`, want: []string{}},
+		{name: "generic octal", input: `LABEL=A\041B /mnt/data ext4 defaults 0 0`, want: []string{}},
 	}
 	for _, test := range cases {
 		test := test
@@ -241,10 +241,10 @@ func TestMountRules(t *testing.T) {
 		{name: "relative mount", input: "/dev/sda1 mnt/data ext4 defaults 0 0", want: []string{"error:mount.relative"}},
 		// Специальная точка none не имеет смысла для обычной файловой системы.
 		{name: "none for non-swap", input: "/dev/sda1 none ext4 defaults 0 0", want: []string{"error:mount.none"}},
-		// Swap не монтируется в обычный абсолютный путь.
-		{name: "absolute swap mount", input: "/dev/sda1 /swap swap defaults 0 0", want: []string{"error:swap.mount"}},
-		// Единственная допустимая точка swap не должна давать mount errors.
-		{name: "none for swap", input: "/dev/sda1 none swap defaults 0 0", want: []string{}},
+		// Swap не монтируется в обычный абсолютный путь, но всё равно получает review.
+		{name: "absolute swap mount", input: "/dev/sda1 /swap swap defaults 0 0", want: []string{"error:swap.mount", "warning:swap.review"}},
+		// Единственная допустимая точка swap даёт только специальное предупреждение.
+		{name: "none for swap", input: "/dev/sda1 none swap defaults 0 0", want: []string{"warning:swap.review"}},
 	}
 	for _, test := range cases {
 		test := test
@@ -532,6 +532,8 @@ func TestRejectedNetworkSources(t *testing.T) {
 			if test.fsType == "smbfs" {
 				want = append(want, "warning:fs.deprecated")
 			}
+			// Network FS получает info даже при malformed source: правила независимы.
+			want = append(want, "info:option.netdev")
 			requireCodes(t, test.source+" /mnt/data "+test.fsType+" defaults 0 0", want)
 		})
 	}
