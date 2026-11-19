@@ -72,11 +72,13 @@ func openTargetFile(path string) (*os.File, error) {
 	file := os.NewFile(uintptr(fd), path)
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {
-		file.Close()
+		// Ошибка Close вторична и не должна заменять первичную причину отказа open.
+		_ = file.Close()
 		return nil, fmt.Errorf("прочитать metadata target: %w", err)
 	}
 	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
-		file.Close()
+		// Ошибка Close вторична и не должна заменять первичную причину отказа open.
+		_ = file.Close()
 		return nil, fmt.Errorf("%w: target не является regular file", ErrInvalidTarget)
 	}
 	return file, nil

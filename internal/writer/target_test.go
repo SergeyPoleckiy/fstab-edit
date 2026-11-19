@@ -129,7 +129,9 @@ func TestReadSnapshotOpenTargetFileRejectsSymlink(t *testing.T) {
 		t.Fatalf("ожидалась ErrInvalidTarget для symlink, получено: %v", err)
 	}
 	if file != nil {
-		file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			t.Errorf("закрыть неожиданно открытый target: %v", closeErr)
+		}
 		t.Fatal("для symlink не должен возвращаться открытый descriptor")
 	}
 }

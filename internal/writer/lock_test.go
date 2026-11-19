@@ -25,7 +25,7 @@ func testSystemLockConfig(target, directory string) lockConfig {
 
 // testRuntimeLockConfig создаёт безопасный XDG runtime base и конфигурацию
 // не-system target, не затрагивая настоящее окружение процесса.
-func testRuntimeLockConfig(t *testing.T, target string) lockConfig {
+func testRuntimeLockConfig(t *testing.T) lockConfig {
 	t.Helper()
 	runtimeDirectory := filepath.Join(t.TempDir(), "runtime")
 	if err := os.Mkdir(runtimeDirectory, 0o700); err != nil {
@@ -38,6 +38,40 @@ func testRuntimeLockConfig(t *testing.T, target string) lockConfig {
 		cacheDirectory:   filepath.Join(t.TempDir(), "cache"),
 		uid:              os.Geteuid(),
 	}
+}
+
+// closeTestLock делает отложенное и аварийное освобождение проверяемым,
+// не маскируя ошибку Close при завершении теста.
+func closeTestLock(t *testing.T, lock *Lock) {
+	t.Helper()
+	if err := lock.Close(); err != nil {
+		t.Errorf("закрыть test lock %s: %v", lock.Path(), err)
+	}
+}
+
+// countLockDescriptors считает только descriptors, указывающие на конкретный
+// stable lock path; фоновые descriptors Go runtime не влияют на результат.
+func countLockDescriptors(t *testing.T, path string) int {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatalf("прочитать /proc/self/fd: %v", err)
+	}
+	count := 0
+	for _, entry := range entries {
+		target, err := os.Readlink(filepath.Join("/proc/self/fd", entry.Name()))
+		if os.IsNotExist(err) {
+			// Descriptor мог закрыться между ReadDir и Readlink.
+			continue
+		}
+		if err != nil {
+			t.Fatalf("прочитать symlink descriptor %s: %v", entry.Name(), err)
+		}
+		if target == path {
+			count++
+		}
+	}
+	return count
 }
 
 // expectedLockPath повторяет публичный контракт имени lock-файла, а не
@@ -83,7 +117,7 @@ func TestAcquireLockSystemExclusionAndStableFile(t *testing.T) {
 	config := testSystemLockConfig(target, filepath.Join(dir, "locks"))
 	expected := expectedLockPath(t, target, config.systemDirectory)
 
-	first, err := acquireLockWithConfig(nil, target, 100*time.Millisecond, config)
+	first, err := acquireLockWithConfig(nil, target, 100*time.Millisecond, config) //nolint:staticcheck // Намеренный nil проверяет обязательную нормализацию context.
 	if err != nil {
 		t.Fatalf("захватить первый lock: %v", err)
 	}
@@ -151,17 +185,17 @@ func TestAcquireLockDifferentTargetsUseDifferentPaths(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	config := testRuntimeLockConfig(t, firstTarget)
+	config := testRuntimeLockConfig(t)
 	first, err := acquireLockWithConfig(context.Background(), firstTarget, 100*time.Millisecond, config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer first.Close()
+	defer closeTestLock(t, first)
 	second, err := acquireLockWithConfig(context.Background(), secondTarget, 100*time.Millisecond, config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer second.Close()
+	defer closeTestLock(t, second)
 	if first.Path() == second.Path() {
 		t.Fatalf("разные target получили один lock path %q", first.Path())
 	}
@@ -183,7 +217,7 @@ func TestAcquireLockCanonicalizesParentSymlink(t *testing.T) {
 	if err := os.Symlink(realDirectory, linkedDirectory); err != nil {
 		t.Fatal(err)
 	}
-	config := testRuntimeLockConfig(t, target)
+	config := testRuntimeLockConfig(t)
 	direct, err := acquireLockWithConfig(context.Background(), target, 100*time.Millisecond, config)
 	if err != nil {
 		t.Fatal(err)
@@ -195,7 +229,7 @@ func TestAcquireLockCanonicalizesParentSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer throughLink.Close()
+	defer closeTestLock(t, throughLink)
 	if direct.Path() != throughLink.Path() {
 		t.Fatalf("parent symlink изменил lock path: %q и %q", direct.Path(), throughLink.Path())
 	}
@@ -216,7 +250,7 @@ func TestAcquireLockRejectsInsecureLockDirectory(t *testing.T) {
 	config := testSystemLockConfig(target, lockDirectory)
 	lock, err := acquireLockWithConfig(context.Background(), target, 30*time.Millisecond, config)
 	if err == nil {
-		lock.Close()
+		closeTestLock(t, lock)
 		t.Fatal("ожидался отказ для lock directory 0755")
 	}
 	assertOwnedMode(t, lockDirectory, 0o755, os.Geteuid())
@@ -241,7 +275,7 @@ func TestAcquireLockRejectsInsecureLockFile(t *testing.T) {
 	}
 	lock, err := acquireLockWithConfig(context.Background(), target, 30*time.Millisecond, config)
 	if err == nil {
-		lock.Close()
+		closeTestLock(t, lock)
 		t.Fatal("ожидался отказ для lock file 0644")
 	}
 	assertOwnedMode(t, path, 0o644, os.Geteuid())
@@ -274,7 +308,7 @@ func TestAcquireLockRejectsSymlinkLockFile(t *testing.T) {
 	}
 	lock, err := acquireLockWithConfig(context.Background(), target, 30*time.Millisecond, config)
 	if err == nil {
-		lock.Close()
+		closeTestLock(t, lock)
 		t.Fatal("ожидался отказ для symlink lock file")
 	}
 	info, statErr := os.Lstat(path)
@@ -302,7 +336,7 @@ func TestAcquireLockRejectsForeignSimulatedOwner(t *testing.T) {
 	config.uid = os.Geteuid() + 1
 	lock, err := acquireLockWithConfig(context.Background(), target, 30*time.Millisecond, config)
 	if err == nil {
-		lock.Close()
+		closeTestLock(t, lock)
 		t.Fatal("ожидался отказ для lock directory с чужим simulated UID")
 	}
 	assertOwnedMode(t, config.systemDirectory, 0o700, os.Geteuid())
@@ -316,12 +350,12 @@ func TestAcquireLockUsesSecureRuntimeDirectory(t *testing.T) {
 		if err := os.WriteFile(target, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		config := testRuntimeLockConfig(t, target)
+		config := testRuntimeLockConfig(t)
 		lock, err := acquireLockWithConfig(context.Background(), target, 100*time.Millisecond, config)
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer lock.Close()
+		defer closeTestLock(t, lock)
 		expectedDirectory := filepath.Join(config.runtimeDirectory, "fstab-edit")
 		assertOwnedMode(t, expectedDirectory, 0o700, os.Geteuid())
 		if lock.Path() != expectedLockPath(t, target, expectedDirectory) {
@@ -335,13 +369,13 @@ func TestAcquireLockUsesSecureRuntimeDirectory(t *testing.T) {
 		if err := os.WriteFile(target, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		config := testRuntimeLockConfig(t, target)
+		config := testRuntimeLockConfig(t)
 		if err := os.Chmod(config.runtimeDirectory, 0o755); err != nil {
 			t.Fatal(err)
 		}
 		lock, err := acquireLockWithConfig(context.Background(), target, 30*time.Millisecond, config)
 		if err == nil {
-			lock.Close()
+			closeTestLock(t, lock)
 			t.Fatal("ожидался отказ для XDG runtime directory 0755")
 		}
 		assertOwnedMode(t, config.runtimeDirectory, 0o755, os.Geteuid())
@@ -366,7 +400,7 @@ func TestAcquireLockUsesStableCacheFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer closeTestLock(t, lock)
 	expectedDirectory := filepath.Join(config.cacheDirectory, "fstab-edit", fmt.Sprintf("runtime-%d", config.uid))
 	assertOwnedMode(t, expectedDirectory, 0o700, os.Geteuid())
 	if lock.Path() != expectedLockPath(t, target, expectedDirectory) {
@@ -415,7 +449,7 @@ func TestAcquireLockContextCancellation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer held.Close()
+			defer closeTestLock(t, held)
 			ctx, cancel := test.makeContext()
 			defer cancel()
 			started := time.Now()
@@ -446,9 +480,10 @@ func TestLockTimeoutNormalization(t *testing.T) {
 	}
 }
 
-// TestAcquireLockTimeoutDoesNotLeakContention проверяет descriptor lifecycle:
-// после failed timeout и освобождения владельца новый acquire обязан успеть.
-func TestAcquireLockTimeoutDoesNotLeakContention(t *testing.T) {
+// TestAcquireLockTimeoutDoesNotLeakDescriptors проверяет по конкретному path,
+// что серия failed timeouts оставляет только descriptor владельца, а после его
+// Close не остаётся ни одного descriptor; повторный acquire также обязан успеть.
+func TestAcquireLockTimeoutDoesNotLeakDescriptors(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "fstab")
 	if err := os.WriteFile(target, nil, 0o600); err != nil {
@@ -459,14 +494,28 @@ func TestAcquireLockTimeoutDoesNotLeakContention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lock, err := acquireLockWithConfig(context.Background(), target, 30*time.Millisecond, config); !errors.Is(err, ErrLockTimeout) {
-		if lock != nil {
-			lock.Close()
+	defer closeTestLock(t, held)
+	if count := countLockDescriptors(t, held.Path()); count != 1 {
+		t.Fatalf("до timeout ожидался один descriptor владельца, получено: %d", count)
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		lock, err := acquireLockWithConfig(context.Background(), target, 30*time.Millisecond, config)
+		if !errors.Is(err, ErrLockTimeout) {
+			if lock != nil {
+				closeTestLock(t, lock)
+			}
+			t.Fatalf("попытка %d: ожидался failed timeout, получено: %v", attempt+1, err)
 		}
-		t.Fatalf("ожидался failed timeout, получено: %v", err)
+		// Каждый failed acquire обязан закрыть собственный descriptor, не трогая held.
+		if count := countLockDescriptors(t, held.Path()); count != 1 {
+			t.Fatalf("попытка %d оставила descriptors: получено %d, ожидался только held", attempt+1, count)
+		}
 	}
 	if err := held.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if count := countLockDescriptors(t, held.Path()); count != 0 {
+		t.Fatalf("после held.Close остались descriptors lock path: %d", count)
 	}
 	acquired, err := acquireLockWithConfig(context.Background(), target, 100*time.Millisecond, config)
 	if err != nil {
