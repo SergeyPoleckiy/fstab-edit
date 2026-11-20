@@ -114,7 +114,17 @@ func NewApp(options AppOptions) *App {
 	app := &App{
 		options: options,
 		service: cliapp.NewService(dependencies, options.Runner),
-		stdin:   bufio.NewReader(options.Stdin),
+	}
+	// Единственный buffered reader на stdin: prompt-подтверждения и
+	// интерактивный chooser разделяют один буфер, иначе readahead одного
+	// reader'а потерял бы ввод другого (scripted «2\ny\n» между prompt'ами).
+	// Производственный вызывающий код (main) уже создал *bufio.Reader и
+	// передаёт его chooser'у, поэтому повторная обёртка недопустима;
+	// прочие reader'ы (тесты) оборачиваются здесь ровно один раз.
+	if reader, ok := options.Stdin.(*bufio.Reader); ok {
+		app.stdin = reader
+	} else {
+		app.stdin = bufio.NewReader(options.Stdin)
 	}
 	app.root = app.buildRootCommand()
 	return app
@@ -309,10 +319,12 @@ func (a *App) interactive() bool {
 }
 
 // confirm реализует общий prompt подтверждения [y/N] для мутаций и rollback.
-// Diff и warnings печатаются в stderr до вопроса при любом режиме, чтобы
-// машинный stdout оставался чистым. --yes пропускает prompt после валидации
-// preview; non-TTY без --yes отклоняется usage error; пустой ответ, EOF и
-// любое значение кроме y/yes трактуются как отказ (default No).
+// Diff и warnings печатаются в stderr до вопроса, чтобы машинный stdout
+// оставался чистым; переданные warnings уже отфильтрованы по severity
+// вызывающим кодом (previewWarnings — единственная точка фильтрации).
+// --yes пропускает prompt после валидации preview; non-TTY без --yes
+// отклоняется usage error; пустой ответ, EOF и любое значение кроме y/yes
+// трактуются как отказ (default No).
 func (a *App) confirm(diff string, warnings []models.Diagnostic) (bool, *cliapp.ExitError) {
 	if a.flags.yes {
 		return true, nil
@@ -328,9 +340,7 @@ func (a *App) confirm(diff string, warnings []models.Diagnostic) (bool, *cliapp.
 		}
 	}
 	for _, diagnostic := range warnings {
-		if diagnostic.Severity == models.SeverityWarning {
-			a.writeStderr(fmt.Sprintf("warning: %s\n", diagnostic.Message))
-		}
+		a.writeStderr(fmt.Sprintf("warning: %s\n", diagnostic.Message))
 	}
 	a.writeStderr("Применить изменения? [y/N] ")
 	answer, err := a.stdin.ReadString('\n')
@@ -346,8 +356,10 @@ func (a *App) confirm(diff string, warnings []models.Diagnostic) (bool, *cliapp.
 	}
 }
 
-// previewWarnings отбирает warning-диагностики candidate: именно они показываются
-// перед prompt согласно ТЗ 11.6; info-замечения prompt не блокируют и не дублируются.
+// previewWarnings — единственная точка фильтрации warning-диагностики
+// candidate: именно они показываются перед prompt согласно ТЗ 11.6;
+// info-замечения prompt не блокируют и не дублируются. Возвращённый список
+// передаётся в confirm как есть, без повторной проверки severity.
 func previewWarnings(report models.Report) []models.Diagnostic {
 	warnings := make([]models.Diagnostic, 0)
 	for _, diagnostic := range report.Diagnostics {

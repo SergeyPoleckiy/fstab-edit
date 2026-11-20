@@ -21,6 +21,7 @@ import (
 	"fstab-edit/internal/cliapp"
 	"fstab-edit/internal/sysutil"
 	"fstab-edit/internal/transaction"
+	"fstab-edit/internal/writer"
 	"fstab-edit/pkg/models"
 )
 
@@ -680,4 +681,115 @@ func reportWithError() models.Report {
 	return models.Report{Diagnostics: []models.Diagnostic{
 		{Severity: models.SeverityError, Code: "fake.error", Message: "fake"},
 	}}
+}
+
+// transactionProbe фиксирует число вызовов подменённой границы Service:
+// fake ExecuteTransaction/CreateBackup инкрементируют счётчики, поэтому тесты
+// доказывают отсутствие backup/lock/write, а не только неизменность байтов.
+type transactionProbe struct {
+	transactions int
+	backups      int
+}
+
+// dependencies собирает перекрытия cliapp.Dependencies: ExecuteTransaction
+// инкрементирует счётчик и завершается успехом с заданным Changed.
+func (p *transactionProbe) dependencies(changed bool) *cliapp.Dependencies {
+	return &cliapp.Dependencies{
+		ExecuteTransaction: func(_ context.Context, _ transaction.Plan, _ transaction.Options) (transaction.TransactionResult, error) {
+			p.transactions++
+			return transaction.TransactionResult{Changed: changed}, nil
+		},
+		CreateBackup: func(_ writer.Snapshot, _ backup.CreateOptions) (backup.Backup, error) {
+			p.backups++
+			return backup.Backup{}, nil
+		},
+	}
+}
+
+// TestMutationPreviewValidationErrorBlocksTransaction проверяет, что candidate
+// с severity=error диагностиками (здесь — дубликат mount point) блокируется
+// кодом 1 до transaction: ExecuteTransaction не вызывается, target не
+// изменён, structured результат публикуется с диагностиками.
+func TestMutationPreviewValidationErrorBlocksTransaction(t *testing.T) {
+	target := writeTempTarget(t, e2eFixture)
+	probe := &transactionProbe{}
+	buffers := &appBuffers{}
+	app := cmd.NewApp(cmd.AppOptions{
+		Stdout:       &buffers.stdout,
+		Stderr:       &buffers.stderr,
+		Stdin:        strings.NewReader(""),
+		TTY:          func() bool { return false },
+		Runner:       &fakeRunner{},
+		Dependencies: probe.dependencies(true),
+	})
+
+	// /mnt/data уже существует в fixture: валидатор кандидата выдаёт
+	// duplicate.mount с severity=error ещё до подтверждения и transaction.
+	code := app.Execute([]string{
+		"add", "--file", target, "--device", "/dev/sdd1", "--mount", "/mnt/data",
+		"--type", "ext4", "--options", "defaults", "--yes", "-o", "json",
+	})
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; stderr: %s", code, buffers.stderr.String())
+	}
+	if probe.transactions != 0 {
+		t.Fatalf("ExecuteTransaction called %d times, want 0", probe.transactions)
+	}
+	if !bytes.Equal(readTargetBytes(t, target), []byte(e2eFixture)) {
+		t.Fatal("blocked mutation changed target")
+	}
+	if !strings.Contains(buffers.stderr.String(), "внутреннюю проверку") {
+		t.Fatalf("stderr missing validation explanation: %q", buffers.stderr.String())
+	}
+	document := decodeSingleMutationDoc(t, &buffers.stdout)
+	if document.BackupID != "" {
+		t.Fatalf("blocked mutation published backup_id %q", document.BackupID)
+	}
+	if len(document.Diagnostics) == 0 {
+		t.Fatal("structured result missing diagnostics for blocked candidate")
+	}
+}
+
+// TestNoOpEditSkipsTransactionAndBackup проверяет документированную семантику
+// no-op: edit с тем же значением поля завершается кодом 0 без transaction и
+// backup, а machine result публикует changed=false и dry_run=false.
+func TestNoOpEditSkipsTransactionAndBackup(t *testing.T) {
+	target := writeTempTarget(t, e2eFixture)
+	probe := &transactionProbe{}
+	buffers := &appBuffers{}
+	app := cmd.NewApp(cmd.AppOptions{
+		Stdout:       &buffers.stdout,
+		Stderr:       &buffers.stderr,
+		Stdin:        strings.NewReader(""),
+		TTY:          func() bool { return false },
+		Runner:       &fakeRunner{},
+		Dependencies: probe.dependencies(true),
+	})
+
+	// --yes задан сознательно: no-op не должен требовать подтверждения и не
+	// должен доходить до transaction даже с ним.
+	code := app.Execute([]string{
+		"edit", "--file", target, "--mount-point", "/mnt/data",
+		"--options", "defaults,noatime", "--yes", "-o", "json",
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
+	}
+	if probe.transactions != 0 || probe.backups != 0 {
+		t.Fatalf("no-op invoked seams: transactions=%d backups=%d, want 0/0",
+			probe.transactions, probe.backups)
+	}
+	if !bytes.Equal(readTargetBytes(t, target), []byte(e2eFixture)) {
+		t.Fatal("no-op edit changed target bytes")
+	}
+	if backups := listBackupData(t, filepath.Dir(target)); len(backups) != 0 {
+		t.Fatalf("no-op edit created backups: %v", backups)
+	}
+	document := decodeSingleMutationDoc(t, &buffers.stdout)
+	if document.Changed || document.DryRun {
+		t.Fatalf("document = %+v, want changed=false dry_run=false", document)
+	}
+	if !strings.Contains(buffers.stderr.String(), "изменений нет") {
+		t.Fatalf("stderr missing no-op message: %q", buffers.stderr.String())
+	}
 }

@@ -22,6 +22,9 @@ import (
 // команда. os.Exit вызывается только здесь, чтобы тесты cmd не затрагивали
 // процесс test-runner.
 func main() {
+	// Единственный buffered reader на stdin: его разделяют prompt-подтверждения
+	// (через App) и интерактивный chooser, поэтому NewApp получает именно
+	// *bufio.Reader и не создаёт второй буфер поверх него.
 	stdin := bufio.NewReader(os.Stdin)
 	app := cmd.NewApp(cmd.AppOptions{
 		Stdout:  os.Stdout,
