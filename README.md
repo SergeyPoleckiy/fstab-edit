@@ -17,7 +17,8 @@
 - Реализованы `findmnt --verify --tab-file` и private candidate check. Содержимое кандидата записывается без нормализации и добавления newline в файл `0600` внутри временного каталога `0700`; после проверки предпринимается попытка `RemoveAll` при любом исходе. Ошибка удаления добавляет `findmnt.candidate_cleanup/warning`, сохраняя первичные diagnostics и `Execution.Err`. Внутренний validator и внешний отчёт объединяются в порядке internal → external.
 - Классификация вывода проверена на fixtures наблюдённого формата **util-linux 2.42.4**. `findmnt` только статически проверяет файл-кандидат и ничего не монтирует.
 - Raw stdout/stderr потенциально содержат sensitive-данные и не предназначены для записи в журнал без redaction; публичный `Report` содержит только обобщённые диагностики, а исходный вывод хранится отдельно в `Execution`.
-- Реализованы secure snapshot/base-hash conflict, стабильные flock и низкоуровневый атомарный `Replace` с сохранением metadata/xattrs. Реализованы backup и ротация: `Create`, `Open`, `List`, `Select` и `Rotate` в `internal/backup`; automatic/manual rollback, transaction и CLI ещё не подключены; тесты writer и backup работают только с временными файлами и не изменяют реальный `/etc/fstab`.
+- Реализованы secure snapshot/base-hash conflict, стабильные flock и низкоуровневый атомарный `Replace` с сохранением metadata/xattrs. Реализованы backup и ротация: `Create`, `Open`, `List`, `Select` и `Rotate` в `internal/backup`.
+- Реализована доменная transaction в `internal/transaction`: internal validation, lock, повторный base SHA-256, `findmnt` candidate check, backup текущей операции, atomic replace, post-check, один automatic rollback и ротация после полного успеха. CLI, prompt, diff, dry-run, обязательный logger/config и manual rollback ещё не подключены; тесты работают только с временными файлами и не изменяют реальный `/etc/fstab`.
 - Актуальная основа разработки: [ТЗ версии 2.0](../fstab-editor-v2.md).
 - Исходная редакция сохранена: [ТЗ версии 1.0](../fstab-editor.md).
 
@@ -31,7 +32,8 @@ work/
 │   ├── editor/           # Selectors и in-memory mutations
 │   ├── validator/        # Синтаксическая и семантическая проверка
 │   ├── writer/           # Блокировки, контроль версии и атомарная запись
-│   ├── backup/           # Backup, метаданные, ротация и rollback
+│   ├── backup/           # Backup, метаданные, выбор и ротация
+│   ├── transaction/      # Доменная оркестрация записи и automatic rollback
 │   ├── config/           # YAML-конфигурация и приоритеты
 │   ├── logger/           # Структурный журнал
 │   ├── i18n/             # Локализация RU/EN
@@ -77,7 +79,19 @@ golangci-lint run
 2. Lock создаётся только явным `AcquireLock` в отдельном стабильном файле, имя которого содержит SHA-256 canonical target. Проверяются владелец и modes каталога `0700` и файла `0600`; используются защищённые system/XDG/cache-каталоги. Стандартный timeout ожидания — **10 секунд**. Библиотека не удерживает lock во время prompt: его lifetime принадлежит будущей transaction.
 3. `Replace` записывает candidate в temp `0600` в parent directory, затем строго выполняет `fchown` → `fchmod` → копирование xattrs через descriptors → file sync → file close → rename → directory sync → повторное чтение и проверку SHA-256. До успешного rename ошибка оставляет target старым и запускает cleanup temp; cleanup errors присоединяются через `errors.Join` без потери первичной причины.
 4. UID/GID, permission bits и доступные xattrs, включая zero-length values, сохраняются. Ошибка чтения или установки конкретного security xattr запрещает replace. SELinux/AppArmor policy не изменяется; enforcing VM test остаётся отдельной release-проверкой и не считается выполненным на обычной temp FS.
-5. Ошибка directory sync или post-rename verification возвращается с `ReplaceResult.Replaced=true`. Низкоуровневый writer не выполняет automatic rollback: будущая transaction обязана при `err != nil && result.Replaced` восстановить backup текущей операции. При `Replaced=false` target считается неизменённым.
+5. Ошибка directory sync или post-rename verification возвращается с `ReplaceResult.Replaced=true`. Низкоуровневый writer сам не выполняет automatic rollback: доменная transaction при `err != nil && result.Replaced` восстанавливает backup текущей операции. При `Replaced=false` target считается неизменённым.
+
+## Транзакция сохранения
+
+Гарантии `internal/transaction.Execute`:
+
+1. No-op candidate, байтово равный target, завершается до lock, validation, backup, `findmnt` и write с `Changed=false`; внутренние ошибки candidate запрещают lock и изменения.
+2. Lock удерживается от повторного чтения target и base SHA-256 через backup, atomic replace, post-check и возможный rollback. Внешнее изменение target запрещает backup/write и завершается классом `conflict`.
+3. Backup создаётся только из snapshot, повторно прочитанного под lock, и заново проверяется через `backup.Open` до replace.
+4. Post-write warnings допустимы; errors вызывают ровно одну попытку restore backup именно текущей transaction. `Replaced=false` никогда не вызывает rollback.
+5. Успешный rollback возвращает primary error с `RolledBack=true`. Rollback failure возвращает класс `rollback`, сохраняет primary и rollback causes и recovery paths target/backup/metadata.
+6. Rotation выполняется только после полного успешного post-check; backup текущей transaction передаётся protected. Ошибка rotation возвращает класс `rotation_after_success`, но не откатывает уже успешно записанный target.
+7. CLI, prompt, diff rendering, dry-run, обязательный logger/config и manual rollback пока не подключены; transaction возвращает typed `FailureKind` для будущих exit codes.
 
 ## Резервные копии и ротация
 
@@ -90,7 +104,7 @@ golangci-lint run
 5. `Create` никогда не изменяет target и возвращает `Backup` только после записи обоих файлов с mode `0600` через `O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC`, fsync каждого файла, повторного чтения и совпадения SHA-256 data с metadata. Backup гарантирует побайтовое восстановление данных копии, но `source_verification` не заявляет работоспособность повреждённого исходника: `invalid`/`unavailable` фиксируют факт проверки, а не исправляют документ.
 6. `Open`/`List`/`Select` отклоняют symlink-подмену любого уровня, mode отличный от `0600`, corrupt schema, hash mismatch, неверные modes/enums/UTC, чужой `source_path` и чужой prefix. `List` возвращает verified копии текущего target в детерминированном newest-first порядке; `Select` различает not found (`ErrBackupNotFound`) и ambiguous collision ID (`ErrBackupAmbiguous`).
 7. `Rotate` удаляет только собственные verified пары (sidecar, затем data): чужие, повреждённые, symlink и непроверенные записи каталога не входят в candidates и никогда не удаляются; `os.RemoveAll` не вызывается. `keep <= 0` заменяется default 10, protected ID сохраняются даже в зоне удаления, `os.ErrNotExist` при удалении не считается сбоем, а ошибка удаления останавливает ротацию с partial `RotationResult` (`Failed`) и сохранённой первичной ошибкой через `errors.Is`. Ошибки rotation содержат пути, но не данные backup, и не влияют на target.
-8. Rollback (automatic и manual), transaction и dry-run ещё не подключены: будущая transaction обязана сама интерпретировать partial `RotationResult` и выполнять restore выбранной через `Select` копии.
+8. Automatic rollback transaction использует backup текущей операции напрямую и не переопределяет выбор через повторный `Select`. Manual rollback, dry-run и интерфейс выбора копии для пользователя пока не подключены.
 
 ## Лицензия
 

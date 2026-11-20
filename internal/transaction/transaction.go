@@ -290,6 +290,7 @@ type transactionOperations struct {
 	replace            func(string, []byte) (writer.ReplaceResult, error)
 	verifyTarget       func(context.Context, sysutil.CommandRunner, string) sysutil.Verification
 	readBackupSnapshot func(string) (writer.Snapshot, error)
+	rotate             func(string, string, string, int, []string) (backup.RotationResult, error)
 }
 
 // productionTransactionOperations заполняет seams готовыми проверенными пакетами.
@@ -308,6 +309,7 @@ func productionTransactionOperations() transactionOperations {
 			return sysutil.NewFindmntVerifier(runner).Verify(ctx, path)
 		},
 		readBackupSnapshot: writer.ReadSnapshot,
+		rotate:             backup.Rotate,
 	}
 }
 
@@ -326,6 +328,7 @@ func validateTransactionOperations(operations transactionOperations) error {
 		{name: "replace", missing: operations.replace == nil},
 		{name: "verifyTarget", missing: operations.verifyTarget == nil},
 		{name: "readBackupSnapshot", missing: operations.readBackupSnapshot == nil},
+		{name: "rotate", missing: operations.rotate == nil},
 	}
 	for _, field := range fields {
 		if field.missing {
@@ -444,7 +447,45 @@ func executeWithOperations(ctx context.Context, plan Plan, options Options, oper
 		return rollbackAfterFailure(result, primary, current.Path, verified, operations)
 	}
 
+	return rotateAfterSuccess(result, plan, options, current.Path, verified, operations)
+}
+
+// rotateAfterSuccess выполняет разрешённую ротацию только после полностью успешной
+// записи и post-check. Backup текущей transaction добавляется в protected list,
+// чтобы свежая копия оставалась доступной для явного rollback; caller slice копируется
+// и никогда не изменяется через append capacity.
+func rotateAfterSuccess(result TransactionResult, plan Plan, options Options, targetPath string, verified backup.Backup, operations transactionOperations) (TransactionResult, error) {
+	effectivePrefix := plan.BackupPrefix
+	if effectivePrefix == "" {
+		effectivePrefix = backup.DefaultBackupPrefix
+	}
+	protected := append([]string(nil), options.RotationProtectedIDs...)
+	protected = append(protected, verified.ID)
+
+	rotation, err := operations.rotate(targetPath, effectivePrefix, plan.BackupDirectory, plan.RotationKeep, protected)
+	result.Rotation = normalizeRotationResult(rotation)
+	if err != nil {
+		// Target уже успешно записан. По ТЗ ошибка rotation сообщается отдельно и
+		// не должна молча откатывать это успешное изменение.
+		return result, transactionFailure(FailureRotation, ErrRotationAfterSuccess,
+			fmt.Errorf("выполнить rotation backups target %s: %w", targetPath, err), result.Recovery)
+	}
 	return result, nil
+}
+
+// normalizeRotationResult гарантирует non-nil slices в public TransactionResult даже
+// если rotate seam или будущий caller вернул zero-value partial result.
+func normalizeRotationResult(rotation backup.RotationResult) backup.RotationResult {
+	if rotation.Removed == nil {
+		rotation.Removed = make([]backup.Backup, 0)
+	}
+	if rotation.Skipped == nil {
+		rotation.Skipped = make([]backup.Backup, 0)
+	}
+	if rotation.Failed == nil {
+		rotation.Failed = make([]backup.Backup, 0)
+	}
+	return rotation
 }
 
 // rollbackAfterFailure выполняет ровно одну попытку восстановления backup текущей
