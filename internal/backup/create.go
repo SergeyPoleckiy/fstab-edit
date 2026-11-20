@@ -382,12 +382,20 @@ func removeCreated(remove func(string) error, paths []string) error {
 }
 
 // readVerifiedBackup заново открывает data и sidecar через writer.ReadSnapshot
-// (что повторно гарантирует regular file и O_NOFOLLOW), парсит metadata и
-// требует совпадения хешей, source hash, backup ID и путей. Это единый
-// verify seam создания: Backup возвращается только после его успеха.
-// source с пустым Path пропускает source-зависимые проверки для будущих
-// потребителей вроде Open, где исходный snapshot отсутствует.
+// (что повторно гарантирует regular file и O_NOFOLLOW), требует exact mode 0600
+// обоих файлов, парсит metadata и требует совпадения хешей, source hash,
+// backup ID и путей. Это единый verify seam создания и открытия: Backup
+// возвращается только после его успеха. source с пустым Path пропускает
+// source-зависимые проверки для потребителей вроде Open, где исходный snapshot
+// отсутствует.
 func readVerifiedBackup(readSnapshot func(string) (writer.Snapshot, error), source writer.Snapshot, dataPath, sidecarPath string) (Backup, error) {
+	// Exact mode 0600 обоих файлов — часть целостности: ослабленные права
+	// делают tampering незаметным, поэтому seam отклоняет их до чтения.
+	for _, pairPath := range []string{dataPath, sidecarPath} {
+		if err := verifyBackupFileMode(pairPath); err != nil {
+			return Backup{}, err
+		}
+	}
 	data, err := readSnapshot(dataPath)
 	if err != nil {
 		return Backup{}, fmt.Errorf("%w: повторно прочитать data backup %s: %w", ErrInvalidBackup, dataPath, err)
