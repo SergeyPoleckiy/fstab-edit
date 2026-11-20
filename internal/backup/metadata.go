@@ -38,7 +38,7 @@ const MetadataSchemaVersion = 1
 const DefaultBackupPrefix = "fstab.bak"
 
 // DefaultKeepBackups — сколько newest-копий сохраняет ротация по умолчанию.
-// Константа объявлена в Task 1, потребитель Rotate появится позже.
+// keep <= 0 нормализуется в эту константу перед удалением кандидатов.
 const DefaultKeepBackups = 10
 
 // ProgramVersion — версия программы, записываемая в metadata. Значение "dev"
