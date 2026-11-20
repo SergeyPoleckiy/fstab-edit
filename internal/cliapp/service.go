@@ -82,7 +82,7 @@ func NewService(dependencies Dependencies, runner sysutil.CommandRunner) *Servic
 func (s *Service) List(target string) (ListResult, *ExitError) {
 	snapshot, err := s.dependencies.ReadSnapshot(target)
 	if err != nil {
-		return ListResult{}, newExitError(ExitIO, err, nil, "прочитать target %s", target)
+		return ListResult{}, newExitErrorK(ExitIO, err, nil, "error.io.read_target", "прочитать target %s", target)
 	}
 	document := parser.Parse(snapshot.Data)
 	report := validator.Validate(document)
@@ -199,7 +199,7 @@ type ValidationResult struct {
 func (s *Service) Validate(ctx context.Context, target string, offline bool) (ValidationResult, *ExitError) {
 	snapshot, err := s.dependencies.ReadSnapshot(target)
 	if err != nil {
-		return ValidationResult{}, newExitError(ExitIO, err, nil, "прочитать target %s", target)
+		return ValidationResult{}, newExitErrorK(ExitIO, err, nil, "error.io.read_target", "прочитать target %s", target)
 	}
 	internal := validator.Validate(parser.Parse(snapshot.Data))
 	result := ValidationResult{
@@ -222,7 +222,7 @@ func validationExitError(report models.Report, target string) *ExitError {
 	if !report.HasErrors() {
 		return nil
 	}
-	return newExitError(ExitValidation, nil, nil,
+	return newExitErrorK(ExitValidation, nil, nil, "error.validation.failed",
 		"проверка target %s завершилась с диагностиками severity=error", target)
 }
 
@@ -233,11 +233,11 @@ func validationExitError(report models.Report, target string) *ExitError {
 func (s *Service) VerifyMount(ctx context.Context, target string) (sysutil.Verification, *ExitError) {
 	snapshot, err := s.dependencies.ReadSnapshot(target)
 	if err != nil {
-		return sysutil.Verification{}, newExitError(ExitIO, err, nil, "прочитать target %s", target)
+		return sysutil.Verification{}, newExitErrorK(ExitIO, err, nil, "error.io.read_target", "прочитать target %s", target)
 	}
 	verification := sysutil.VerifyCandidate(ctx, s.runner, snapshot.Data)
 	if verification.Report.HasErrors() {
-		return verification, newExitError(ExitValidation, nil, nil,
+		return verification, newExitErrorK(ExitValidation, nil, nil, "error.external.verify_failed",
 			"внешняя проверка target %s завершилась с severity=error", snapshot.Path)
 	}
 	return verification, nil
@@ -261,7 +261,7 @@ func (s *Service) RunMutation(ctx context.Context, target string, preview Mutati
 	}
 	var txErr *transaction.TransactionError
 	if errors.As(err, &txErr) {
-		return result, newExitError(ExitCodeForFailureKind(txErr.Kind), txErr, nil, "мутация не сохранена")
+		return result, newExitErrorK(ExitCodeForFailureKind(txErr.Kind), txErr, nil, "error.io.mutation_not_saved", "мутация не сохранена")
 	}
-	return result, newExitError(ExitIO, err, nil, "мутация не сохранена")
+	return result, newExitErrorK(ExitIO, err, nil, "error.io.mutation_not_saved", "мутация не сохранена")
 }

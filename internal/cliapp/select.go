@@ -25,9 +25,11 @@ func SelectorFromValues(positional, line, mount, source string, required bool) (
 	}
 	switch {
 	case ways == 0 && required:
-		return editor.Selector{}, UsageError(nil, "требуется селектор: позиционный аргумент, --line, --mount-point или --device")
+		return editor.Selector{}, UsageErrorK(nil, "error.usage.selector_required",
+			"требуется селектор: позиционный аргумент, --line, --mount-point или --device")
 	case ways > 1:
-		return editor.Selector{}, UsageError(nil, "селектор задан несколькими способами: используйте только один из позиционного аргумента, --line, --mount-point, --device")
+		return editor.Selector{}, UsageErrorK(nil, "error.usage.selector_multiple",
+			"селектор задан несколькими способами: используйте только один из позиционного аргумента, --line, --mount-point, --device")
 	}
 	switch {
 	case positional != "":
@@ -35,7 +37,8 @@ func SelectorFromValues(positional, line, mount, source string, required bool) (
 	case line != "":
 		parsed, err := strconv.Atoi(line)
 		if err != nil || parsed < 1 {
-			return editor.Selector{}, UsageError(nil, "--line требует положительный номер физической строки, получено %q", line)
+			return editor.Selector{}, UsageErrorK(nil, "error.usage.bad_line",
+				"--line требует положительный номер физической строки, получено %q", line)
 		}
 		return editor.ByLine(parsed), nil
 	case mount != "":
@@ -77,12 +80,12 @@ func Resolve(document *models.Document, selector editor.Selector, chooser Choose
 	var ambiguity *editor.AmbiguityError
 	if errors.As(err, &ambiguity) {
 		if !interactive || chooser == nil {
-			return -1, AmbiguityError(err, ambiguity.Lines,
+			return -1, AmbiguityErrorK(err, ambiguity.Lines, "error.ambiguous.resolve",
 				"селектор неоднозначен, уточните его или выберите строку")
 		}
 		picked, chooseErr := chooser.Choose(append([]int(nil), ambiguity.Lines...))
 		if chooseErr != nil {
-			return -1, AmbiguityError(chooseErr, ambiguity.Lines,
+			return -1, AmbiguityErrorK(chooseErr, ambiguity.Lines, "error.ambiguous.choose_failed",
 				"не удалось выбрать строку из кандидатов")
 		}
 		for _, line := range ambiguity.Lines {
@@ -90,8 +93,8 @@ func Resolve(document *models.Document, selector editor.Selector, chooser Choose
 				return line - 1, nil
 			}
 		}
-		return -1, AmbiguityError(nil, ambiguity.Lines,
+		return -1, AmbiguityErrorK(nil, ambiguity.Lines, "error.ambiguous.out_of_range",
 			"выбранная строка %d не входит в список кандидатов", picked)
 	}
-	return -1, ValidationError(err, "запись не выбрана")
+	return -1, ValidationErrorK(err, "error.validation.entry_not_selected", "запись не выбрана")
 }

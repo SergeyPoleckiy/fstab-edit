@@ -44,7 +44,7 @@ func (s *Service) Backup(target string, request BackupRequest) (BackupResult, *E
 	}
 	snapshot, err := s.dependencies.ReadSnapshot(target)
 	if err != nil {
-		return result, newExitError(ExitIO, err, nil, "прочитать target %s", target)
+		return result, newExitErrorK(ExitIO, err, nil, "error.io.read_target", "прочитать target %s", target)
 	}
 	created, err := s.dependencies.CreateBackup(snapshot, backup.CreateOptions{
 		Directory:          request.Directory,
@@ -53,7 +53,7 @@ func (s *Service) Backup(target string, request BackupRequest) (BackupResult, *E
 		SourceVerification: backup.SourceNotChecked,
 	})
 	if err != nil {
-		return result, newExitError(ExitIO, err, nil, "создать backup target %s", snapshot.Path)
+		return result, newExitErrorK(ExitIO, err, nil, "error.io.create_backup", "создать backup target %s", snapshot.Path)
 	}
 	result.Backup = created
 	return result, nil
@@ -101,17 +101,17 @@ func (s *Service) Rollback(ctx context.Context, target string, request RollbackR
 	opened, err := s.dependencies.OpenBackup(selection.Selected.Path)
 	if err != nil {
 		result.Selected = selection.Selected
-		return result, newExitError(ExitIO, err, nil, "проверить backup %s", selection.Selected.Path)
+		return result, newExitErrorK(ExitIO, err, nil, "error.io.check_backup", "проверить backup %s", selection.Selected.Path)
 	}
 	result.Selected = opened
 
 	current, err := s.dependencies.ReadSnapshot(target)
 	if err != nil {
-		return result, newExitError(ExitIO, err, nil, "прочитать target %s", target)
+		return result, newExitErrorK(ExitIO, err, nil, "error.io.read_target", "прочитать target %s", target)
 	}
 	selected, err := s.dependencies.ReadSnapshot(opened.Path)
 	if err != nil {
-		return result, newExitError(ExitIO, err, nil, "прочитать backup %s", opened.Path)
+		return result, newExitErrorK(ExitIO, err, nil, "error.io.read_backup", "прочитать backup %s", opened.Path)
 	}
 	result.Diff = diff.Unified("<current>", "<backup>", current.Data, selected.Data)
 
@@ -131,19 +131,19 @@ func (s *Service) Rollback(ctx context.Context, target string, request RollbackR
 		SourceVerification: backup.SourceNotChecked,
 	})
 	if err != nil {
-		return result, newExitError(ExitIO, err, nil, "создать safety backup target %s", current.Path)
+		return result, newExitErrorK(ExitIO, err, nil, "error.io.create_safety_backup", "создать safety backup target %s", current.Path)
 	}
 	result.SafetyBackup = safety
 
 	if _, err := s.dependencies.Replace(current.Path, selected.Data); err != nil {
-		return result, newExitError(ExitIO, err, nil,
+		return result, newExitErrorK(ExitIO, err, nil, "error.io.replace_target",
 			"заменить target %s резервной копией %s", current.Path, opened.ID)
 	}
 
 	verification := s.dependencies.VerifyTarget(ctx, s.runner, current.Path)
 	result.PostVerification = verification
 	if verification.Report.HasErrors() {
-		return result, newExitError(ExitExternal, nil, nil,
+		return result, newExitErrorK(ExitExternal, nil, nil, "error.external.post_rollback",
 			"post-check target %s после восстановления завершился с severity=error", current.Path)
 	}
 	return result, nil
@@ -154,7 +154,7 @@ func (s *Service) Rollback(ctx context.Context, target string, request RollbackR
 // — на code 6, потому что это внутреннее состояние backup directory.
 func rollbackSelectionError(err error) *ExitError {
 	if errors.Is(err, backup.ErrBackupNotFound) {
-		return ValidationError(err, "резервная копия не найдена")
+		return ValidationErrorK(err, "error.validation.backup_not_found", "резервная копия не найдена")
 	}
-	return newExitError(ExitIO, err, nil, "выбрать резервную копию")
+	return newExitErrorK(ExitIO, err, nil, "error.io.select_backup", "выбрать резервную копию")
 }

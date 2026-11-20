@@ -23,6 +23,14 @@ var catalogEN = map[string]string{
 	"error.validation.failed":               "target %s validation finished with severity=error diagnostics",
 	"error.external.verify_failed":          "external check of target %s finished with severity=error",
 	"error.external.post_rollback":          "post-check of target %s after restore finished with severity=error",
+	// --- Ключи cliapp/select.go и cliapp/Resolve (Task 4) ---
+	"error.usage.selector_required":       "selector required: positional argument, --line, --mount-point or --device",
+	"error.usage.selector_multiple":       "selector given in multiple ways: use only one of positional argument, --line, --mount-point, --device",
+	"error.usage.bad_line":                "--line requires a positive physical line number, got %q",
+	"error.ambiguous.resolve":             "selector is ambiguous, refine it or choose a line",
+	"error.ambiguous.choose_failed":       "failed to choose a line from the candidates",
+	"error.ambiguous.out_of_range":        "selected line %d is not among the candidates",
+	"error.validation.entry_not_selected": "entry not selected",
 
 	// --- Ключи cmd (error.usage, prompt, status, chooser) ---
 	"error.usage.unknown_output":   "unknown output format %q: valid values are table, json, csv, tsv",

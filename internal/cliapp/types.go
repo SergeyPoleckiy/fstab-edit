@@ -84,21 +84,6 @@ func (e *ExitError) Error() string {
 // Unwrap сохраняет sentinel cause для errors.Is и errors.As.
 func (e *ExitError) Unwrap() error { return e.Cause }
 
-// newExitError собирает ExitError без i18n-ключа (MessageKey == "").
-// Используется внутренними call-сайтами пакета cliapp.
-func newExitError(code int, cause error, candidates []int, format string, args ...any) *ExitError {
-	var message string
-	if format != "" {
-		message = fmt.Sprintf(format, args...)
-	}
-	return &ExitError{
-		Code:       code,
-		Message:    message,
-		Cause:      cause,
-		Candidates: append([]int(nil), candidates...),
-	}
-}
-
 // NewExitErrorK — общий конструктор ExitError с явным exit code и i18n-ключом.
 // Message строится через fmt.Sprintf с теми же args (key используется как
 // формат: для ключей без глаголов Message совпадает с ключом), поэтому

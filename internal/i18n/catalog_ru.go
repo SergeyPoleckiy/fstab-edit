@@ -23,6 +23,14 @@ var catalogRU = map[string]string{
 	"error.validation.failed":               "проверка target %s завершилась с диагностиками severity=error",
 	"error.external.verify_failed":          "внешняя проверка target %s завершилась с severity=error",
 	"error.external.post_rollback":          "post-check target %s после восстановления завершился с severity=error",
+	// --- Ключи cliapp/select.go и cliapp/Resolve (Task 4) ---
+	"error.usage.selector_required":       "требуется селектор: позиционный аргумент, --line, --mount-point или --device",
+	"error.usage.selector_multiple":       "селектор задан несколькими способами: используйте только один из позиционного аргумента, --line, --mount-point, --device",
+	"error.usage.bad_line":                "--line требует положительный номер физической строки, получено %q",
+	"error.ambiguous.resolve":             "селектор неоднозначен, уточните его или выберите строку",
+	"error.ambiguous.choose_failed":       "не удалось выбрать строку из кандидатов",
+	"error.ambiguous.out_of_range":        "выбранная строка %d не входит в список кандидатов",
+	"error.validation.entry_not_selected": "запись не выбрана",
 
 	// --- Ключи cmd (error.usage, prompt, status, chooser) ---
 	"error.usage.unknown_output":   "неизвестный формат вывода %q: допустимы table, json, csv, tsv",

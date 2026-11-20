@@ -96,18 +96,18 @@ func applyMutation(document *models.Document, request MutationRequest) *ExitErro
 	case MutationUncomment:
 		_, err = editor.Uncomment(document, request.Selector)
 	default:
-		return ValidationError(nil, "неизвестный вид мутации")
+		return ValidationErrorK(nil, "error.validation.unknown_mutation", "неизвестный вид мутации")
 	}
 	if err == nil {
 		return nil
 	}
 	var ambiguity *editor.AmbiguityError
 	if errors.As(err, &ambiguity) {
-		return AmbiguityError(err, ambiguity.Lines, "селектор неоднозначен")
+		return AmbiguityErrorK(err, ambiguity.Lines, "error.validation.selector_ambiguous", "селектор неоднозначен")
 	}
 	// ErrNotFound, ErrWrongState, ErrInvalidChange, ErrEmptyField и ошибки
 	// parser.EncodeField — недопустимые данные или изменение, code 1.
-	return ValidationError(err, "мутация не применена")
+	return ValidationErrorK(err, "error.validation.mutation_not_applied", "мутация не применена")
 }
 
 // PrepareMutation строит preview одной мутации, ничего не сохраняя и не
@@ -117,11 +117,11 @@ func applyMutation(document *models.Document, request MutationRequest) *ExitErro
 // как *ExitError: неоднозначность — code 8 с Candidates, остальные — code 1.
 func PrepareMutation(document *models.Document, request MutationRequest) (*MutationPreview, *ExitError) {
 	if document == nil {
-		return nil, ValidationError(editor.ErrNilDocument, "документ не задан")
+		return nil, ValidationErrorK(editor.ErrNilDocument, "error.validation.document_not_set", "документ не задан")
 	}
 	operation, ok := operationForKind(request.Kind)
 	if !ok {
-		return nil, ValidationError(nil, "неизвестный вид мутации")
+		return nil, ValidationErrorK(nil, "error.validation.unknown_mutation", "неизвестный вид мутации")
 	}
 
 	original := append([]byte(nil), document.Serialize()...)
