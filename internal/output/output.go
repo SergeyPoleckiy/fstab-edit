@@ -328,12 +328,12 @@ func renderDelimited(records [][]string, separator byte) ([]byte, error) {
 	return []byte(buffer.String()), nil
 }
 
-// escapeTSV экранирует tab, newline и backslash через backslash: tab → \t,
-// newline → \n, backslash → \\. Порядок замены обеспечивает обратимость:
-// backslash заменяется первым, поэтому escape-последовательности не
-// перекрываются. Carriage return не встречается в fstab-полях и не экранируется.
+// escapeTSV экранирует tab, newline, carriage return и backslash через backslash:
+// tab → \t, LF → \n, CR → \r, backslash → \\. Backslash заменяется в рамках
+// того же прохода по символам первым по смыслу: escape-последовательности не
+// перекрываются и преобразование обратимо.
 func escapeTSV(value string) string {
-	if !strings.ContainsAny(value, "\\\t\n") {
+	if !strings.ContainsAny(value, "\\\t\n\r") {
 		return value
 	}
 	var builder strings.Builder
@@ -346,6 +346,8 @@ func escapeTSV(value string) string {
 			builder.WriteString(`\t`)
 		case '\n':
 			builder.WriteString(`\n`)
+		case '\r':
+			builder.WriteString(`\r`)
 		default:
 			builder.WriteRune(char)
 		}
@@ -358,9 +360,10 @@ func escapeTSV(value string) string {
 func renderListTable(result cliapp.ListResult) []byte {
 	var buffer strings.Builder
 	writer := tabwriter.NewWriter(&buffer, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(writer, "LINE\tSTATE\tSOURCE\tMOUNT\tTYPE\tOPTIONS\tDUMP\tPASS\tSTATUS")
+	// tabwriter.Write не возвращает ошибок: данные буферизуются в памяти.
+	_, _ = fmt.Fprintln(writer, "LINE\tSTATE\tSOURCE\tMOUNT\tTYPE\tOPTIONS\tDUMP\tPASS\tSTATUS")
 	for _, entry := range result.Entries {
-		fmt.Fprintf(writer, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(writer, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			entry.Line,
 			entry.State,
 			tableField(entry.Source),
@@ -395,7 +398,9 @@ func renderDiagnosticsTable(diagnostics []models.Diagnostic) []byte {
 }
 
 // renderMutationTable формирует human summary вместе с diff: итог операции
-// читается до просмотра diff, а сам diff печатается без изменений.
+// читается до просмотра diff, а сам diff печатается без изменений. Вывод
+// гарантированно завершается newline даже если diff не содержит финального
+// перевода строки.
 func renderMutationTable(preview *cliapp.MutationPreview, target string, dryRun bool, executed *transaction.TransactionResult) []byte {
 	var builder strings.Builder
 	changed := preview.Changed
@@ -413,6 +418,9 @@ func renderMutationTable(preview *cliapp.MutationPreview, target string, dryRun 
 	}
 	builder.WriteByte('\n')
 	builder.WriteString(preview.Diff)
+	if !strings.HasSuffix(builder.String(), "\n") {
+		builder.WriteByte('\n')
+	}
 	return []byte(builder.String())
 }
 

@@ -578,7 +578,7 @@ func TestUnknownFormatRejected(t *testing.T) {
 	if _, err := RenderDiagnostics(nil, Format("yaml")); err == nil {
 		t.Errorf("неизвестный формат diagnostics: ожидается ошибка")
 	}
-	if _, err := RenderMutation(nil, "/etc/fstab", false, nil, Format("yaml")); err == nil {
+	if _, err := RenderMutation(mutationPreviewFixture(), "/etc/fstab", false, nil, Format("yaml")); err == nil {
 		t.Errorf("неизвестный формат mutation: ожидается ошибка")
 	}
 	if _, err := RenderBackup(backup.Backup{}, false, Format("yaml")); err == nil {
@@ -678,7 +678,7 @@ func TestRenderMutationNilPreview(t *testing.T) {
 }
 
 // TestEscapeTSVRoundTrip проверяет обратимость escaping: смешанные
-// последовательности экранируются без перекрытий.
+// последовательности экранируются без перекрытий, backslash заменяется первым.
 func TestEscapeTSVRoundTrip(t *testing.T) {
 	value := "a\\b\tc\nd\\\\e"
 	escaped := escapeTSV(value)
@@ -688,5 +688,47 @@ func TestEscapeTSVRoundTrip(t *testing.T) {
 	}
 	if escapeTSV("plain") != "plain" {
 		t.Errorf("plain значение не должно изменяться")
+	}
+}
+
+// TestEscapeTSVCR проверяет экранирование carriage return отдельно и внутри
+// смешанной последовательности: CR не должен оставаться сырым byte в TSV-ячейке.
+func TestEscapeTSVCR(t *testing.T) {
+	if escaped := escapeTSV("a\rb"); escaped != `a\rb` {
+		t.Errorf("CR: получено %q, ожидается %q", escaped, `a\rb`)
+	}
+	mixed := "x\r\\\t\ny"
+	escaped := escapeTSV(mixed)
+	expected := `x\r\\\t\ny`
+	if escaped != expected {
+		t.Errorf("смешанная последовательность: получено %q, ожидается %q", escaped, expected)
+	}
+}
+
+// TestRenderListTSVCREscaping проверяет, что CR в значении поля проходит через
+// renderer list TSV и не остаётся неэкранированным.
+func TestRenderListTSVCREscaping(t *testing.T) {
+	result := listResultFixture()
+	result.Entries[0].Comment = "перенос\rстроки"
+	data, err := RenderList(result, FormatTSV)
+	if err != nil {
+		t.Fatalf("RenderList: %v", err)
+	}
+	if !strings.Contains(string(data), `перенос\rстроки`) {
+		t.Errorf("TSV не экранирует CR в comment:\n%s", data)
+	}
+}
+
+// TestRenderMutationTableTrailingNewLine проверяет, что human summary мутации
+// завершается newline даже если diff не содержит финального перевода строки.
+func TestRenderMutationTableTrailingNewLine(t *testing.T) {
+	preview := mutationPreviewFixture()
+	preview.Diff = "@@ -1,1 +1,2 @@\n+новая строка"
+	data, err := RenderMutation(preview, "/etc/fstab", false, nil, FormatTable)
+	if err != nil {
+		t.Fatalf("RenderMutation: %v", err)
+	}
+	if !strings.HasSuffix(string(data), "\n") {
+		t.Errorf("table mutation должен завершаться newline:\n%q", data)
 	}
 }
