@@ -4,7 +4,7 @@
 
 **Goal:** реализовать доменную transaction сохранения fstab: no-op detection, внутреннюю проверку candidate, lock, повторный base hash, findmnt pre-check, backup текущей операции, atomic replace, post-check и automatic rollback копии именно этой transaction.
 
-**Architecture:** оркестрация размещается в `internal/writer` согласно ТЗ. Публичный `Execute` принимает immutable `Plan` с готовыми bytes и `Options` с `sysutil.CommandRunner`; он не занимается CLI, prompt, diff, dry-run или журналом. `Execute` использует уже проверенные примитивы `writer.AcquireLock/VerifyBaseHash/Replace`, `backup.Create/Open/Rotate` и `sysutil.VerifyCandidate/FindmntVerifier`. Fault injection и все границы отказов выполняются через immutable per-call operations struct.
+**Architecture:** оркестрация размещается в отдельном доменном пакете `internal/transaction`, потому что `internal/backup` уже зависит от `internal/writer`, и размещение transaction в writer создало бы цикл импортов. Публичный `Execute` принимает immutable `Plan` с готовыми bytes и `Options` с `sysutil.CommandRunner`; он не занимается CLI, prompt, diff, dry-run или журналом. `Execute` использует уже проверенные примитивы `writer.AcquireLock/VerifyBaseHash/Replace`, `backup.Create/Open/Rotate` и `sysutil.VerifyCandidate/FindmntVerifier`. Fault injection и все границы отказов выполняются через immutable per-call operations struct.
 
 **Tech Stack:** Go 1.22+, существующие internal packages (`parser`, `validator`, `models`, `sysutil`, `backup`, `writer`), стандартные `context`, `crypto/sha256`, `errors`; новых зависимостей нет.
 
@@ -32,10 +32,10 @@
 
 ## Структура файлов и внешние контракты
 
-- `internal/writer/transaction.go` — Plan/Options/Result, FailureKind/TransactionError, prepare и публичный Execute.
-- `internal/writer/transaction_test.go` — no-op/validation/base-conflict/lock lifecycle tests.
-- `internal/writer/transaction_execute_test.go` — backup/replace/post-check/rollback fault matrix.
-- `internal/writer/transaction_rotation_test.go` — success rotation, protected current backup и integration tests.
+- `internal/transaction/transaction.go` — Plan/Options/Result, FailureKind/TransactionError, prepare и публичный Execute.
+- `internal/transaction/transaction_test.go` — no-op/validation/base-conflict/lock lifecycle tests.
+- `internal/transaction/transaction_execute_test.go` — backup/replace/post-check/rollback fault matrix.
+- `internal/transaction/transaction_rotation_test.go` — success rotation, protected current backup и integration tests.
 - `README.md` — transaction guarantees и отсутствующие CLI/logger/dry-run.
 
 Экспортируемый контракт:
@@ -112,19 +112,19 @@ func Execute(ctx context.Context, plan Plan, options Options) (TransactionResult
 ### Task 1: Transaction model, no-op и internal validation
 
 **Files:**
-- Create: `internal/writer/transaction.go`
-- Create: `internal/writer/transaction_test.go`
+- Create: `internal/transaction/transaction.go`
+- Create: `internal/transaction/transaction_test.go`
 
 **Interfaces:**
-- Consumes: `parser.Parse`, `validator.Validate`, `writer.ReadSnapshot` из текущего пакета, `backup.Operation`, `models.Report`.
+- Consumes: `parser.Parse`, `validator.Validate`, `writer.ReadSnapshot`, `writer.Snapshot`, `backup.Operation`, `models.Report`.
 - Produces: Plan/Options/RecoveryPaths/TransactionResult/FailureKind/TransactionError/sentinel errors, `prepareTransaction`, `transactionFailure`; публичный `Execute` intentionally появится в Task 2.
 
 - [ ] **Step 1: Написать failing tests model/preparation**
 
-Тесты package `writer`, temp target и candidate. Проверь exact error classification:
+Тесты package `transaction`, temp target и candidate. Проверь exact error classification:
 
 ```go
-_, err := prepareTransaction(Plan{TargetPath: path, Candidate: []byte("...")}, prepareOperations{readSnapshot: ReadSnapshot})
+_, err := prepareTransaction(Plan{TargetPath: path, Candidate: []byte("...")}, prepareOperations{readSnapshot: writer.ReadSnapshot})
 var txErr *TransactionError
 if !errors.As(err, &txErr) || txErr.Kind != FailureValidation {
 	t.Fatalf("ожидался validation failure, получено %v", err)
@@ -143,7 +143,7 @@ Cases:
 8. `TransactionError.Error()` содержит Russian kind/cause без stack; `Unwrap()` возвращает первичную cause.
 9. `FailureKind` values точно совпадают с контрактом: `validation`, `conflict`, `external`, `io`, `rollback`, `rotation_after_success`.
 
-Run: `go test ./internal/writer -run='Test(PrepareTransaction|TransactionError)' -v`
+Run: `go test ./internal/transaction -run='Test(PrepareTransaction|TransactionError)' -v`
 Expected: FAIL, transaction model отсутствует.
 
 - [ ] **Step 2: Реализовать types и typed transaction failure**
@@ -163,7 +163,7 @@ func wrapTransactionFailure(kind FailureKind, sentinel, cause error, recovery Re
 
 - [ ] **Step 3: Реализовать prepareTransaction**
 
-Internal `prepareOperations` содержит только `readSnapshot func(string) (Snapshot, error)`; production value — текущий `ReadSnapshot`. Nil readSnapshot отклоняется programming error до чтения target.
+Internal `prepareOperations` содержит только `readSnapshot func(string) (writer.Snapshot, error)`; production value — `writer.ReadSnapshot`. Nil readSnapshot отклоняется programming error до чтения target.
 
 Algorithm:
 
@@ -177,24 +177,24 @@ Algorithm:
 
 Не делай lock/backup/replace в Task 1.
 
-Run: `gofmt -w internal/writer && go test ./internal/writer -run='Test(PrepareTransaction|TransactionError)' -v`
+Run: `gofmt -w internal/transaction && go test ./internal/transaction -run='Test(PrepareTransaction|TransactionError)' -v`
 Expected: PASS.
 
 - [ ] **Step 4: Проверить и закоммитить**
 
-Run: `go test ./... && go test -race ./internal/writer && go vet ./...`
+Run: `go test ./... && go test -race ./internal/transaction && go vet ./...`
 Expected: PASS.
 
 ```bash
-git add internal/writer/transaction.go internal/writer/transaction_test.go
+git add internal/transaction/transaction.go internal/transaction/transaction_test.go
 git commit -m "feat: add transaction validation preparation"
 ```
 
 ### Task 2: Execute с backup, post-check и automatic rollback
 
 **Files:**
-- Modify: `internal/writer/transaction.go`
-- Create: `internal/writer/transaction_execute_test.go`
+- Modify: `internal/transaction/transaction.go`
+- Create: `internal/transaction/transaction_execute_test.go`
 
 **Interfaces:**
 - Consumes: Task 1 prepared transaction; `writer.AcquireLock`, `VerifyBaseHash`, `Replace`; `backup.Create/Open`; `sysutil.VerifyCandidate`, `NewFindmntVerifier`.
@@ -212,14 +212,14 @@ Define fake lock with `Close` count/error. Internal seam:
 
 ```go
 type transactionOperations struct {
-	readSnapshot       func(string) (Snapshot, error)
+	readSnapshot       func(string) (writer.Snapshot, error)
 	acquireLock        func(context.Context, string, time.Duration) (transactionLock, error)
 	verifyCandidate    func(context.Context, sysutil.CommandRunner, []byte) sysutil.Verification
-	createBackup       func(Snapshot, backup.CreateOptions) (backup.Backup, error)
+	createBackup       func(writer.Snapshot, backup.CreateOptions) (backup.Backup, error)
 	openBackup         func(string) (backup.Backup, error)
-	replace            func(string, []byte) (ReplaceResult, error)
+	replace            func(string, []byte) (writer.ReplaceResult, error)
 	verifyTarget       func(context.Context, sysutil.CommandRunner, string) sysutil.Verification
-	readBackupSnapshot func(string) (Snapshot, error)
+	readBackupSnapshot func(string) (writer.Snapshot, error)
 }
 type transactionLock interface{ Close() error }
 ```
@@ -245,7 +245,7 @@ Failure matrix:
 11. Rollback `replace` error → `FailureRollback`, primary cause не теряется (`errors.Is` по обеим), no repeated rollback.
 12. Deferred lock close error присоединяется к returned error без потери primary class; lock count remains один.
 
-Run: `go test ./internal/writer -run='TestExecute' -v`
+Run: `go test ./internal/transaction -run='TestExecute' -v`
 Expected: FAIL, Execute/operations отсутствуют.
 
 - [ ] **Step 2: Реализовать locked sequence и lock lifecycle**
@@ -256,7 +256,7 @@ Expected: FAIL, Execute/operations отсутствуют.
 
 1. Acquire lock через seam with `options.LockTimeout` (0 = writer default). Любая ошибка, включая context cancellation/timeout, → `FailureConflict`.
 2. `lockClosed := false`; deferred close once. Close error присоединяется через `errors.Join`; он не меняет `TransactionResult` и не заменяет primary class.
-3. Под lock `current, err := VerifyBaseHash(plan.TargetPath, prepared.base.SHA256)`; ошибка `ErrBaseHashConflict` или read error → `FailureConflict`. Важно: target может быть прочитан через тот же seam `readSnapshot`, но сравнение SHA должно быть явным и покрыто тестом.
+3. Под lock прочитай target через seam `operations.readSnapshot(plan.TargetPath)` и явно сравни `current.SHA256` с `prepared.base.SHA256`; `writer.ErrBaseHashConflict` или read error → `FailureConflict`. Это позволяет fault injection покрыть повторное чтение без вызова несвободного от seam внутреннего API.
 4. `pre := operations.verifyCandidate(ctx, options.Runner, plan.Candidate)`; `HasErrors()` → `FailureExternal`. Сохранить `result.PreVerification`.
 5. sourceVerification := `backup.SourceValid` при успешной проверке; `CreateOptions{Directory: plan.BackupDirectory, Prefix: plan.BackupPrefix, Operation: plan.Operation, SourceVerification: sourceVerification}`. Backup создаётся из `current`, не из первоначального base snapshot.
 6. `created, err := operations.createBackup(current, createOptions)`; error → `FailureIO`, recovery уже содержит target path.
@@ -279,7 +279,7 @@ Rollback algorithm:
 
 Не делай post-rollback findmnt, повторную запись или cleanup backup: backup текущей transaction сохраняется для диагностики.
 
-Run: `gofmt -w internal/writer && go test ./internal/writer -run='TestExecute' -v && go test -race ./internal/writer`
+Run: `gofmt -w internal/transaction && go test ./internal/transaction -run='TestExecute' -v && go test -race ./internal/transaction`
 Expected: PASS.
 
 - [ ] **Step 4: Полный пакет и commit**
@@ -288,15 +288,15 @@ Run: `go test ./... && go vet ./...`
 Expected: PASS.
 
 ```bash
-git add internal/writer/transaction.go internal/writer/transaction_execute_test.go
+git add internal/transaction/transaction.go internal/transaction/transaction_execute_test.go
 git commit -m "feat: execute fstab transactions with rollback"
 ```
 
 ### Task 3: Rotation после успеха и README
 
 **Files:**
-- Modify: `internal/writer/transaction.go`
-- Create: `internal/writer/transaction_rotation_test.go`
+- Modify: `internal/transaction/transaction.go`
+- Create: `internal/transaction/transaction_rotation_test.go`
 - Modify: `README.md`
 
 **Interfaces:**
@@ -316,7 +316,7 @@ Use real temp target/candidate/backup plus fake lock/runner.
 7. Empty `RotationProtectedIDs` slice не алиасится с append; caller slice не изменяется.
 8. Result.Rotation slices non-nil при rotation success/failure.
 
-Run: `go test ./internal/writer -run='TestExecuteRotation' -v`
+Run: `go test ./internal/transaction -run='TestExecuteRotation' -v`
 Expected: FAIL, rotation step отсутствует.
 
 - [ ] **Step 2: Реализовать post-success rotation**
@@ -340,7 +340,7 @@ Empty backup prefix normalizes to `backup.DefaultBackupPrefix` для rotation, 
 
 Lock deferred close присоединяет close error после rotation: если rotation вернула ошибку, она остаётся primary; cleanup error не заменяет её.
 
-Run: `gofmt -w internal/writer && go test ./internal/writer -run='TestExecuteRotation' -v`
+Run: `gofmt -w internal/transaction && go test ./internal/transaction -run='TestExecuteRotation' -v`
 Expected: PASS.
 
 - [ ] **Step 3: README, полная приёмка и commit**
@@ -348,18 +348,18 @@ Expected: PASS.
 README: transaction orchestrates lock/base check, internal validation, findmnt candidate check, current backup, atomic replace, post-check и один automatic rollback; no-op не создаёт backup/lock/write; post-write warnings допустимы; rollback failure критический и оставляет paths; rotation error после успешной записи не откатывает изменение; CLI/prompt/diff/dry-run/logger/config/manual rollback ещё не подключены.
 
 ```bash
-gofmt -w internal/writer
+gofmt -w internal/transaction
 go test ./...
 go test -race ./...
 go vet ./...
 golangci-lint run
-go test ./internal/writer -cover
+go test ./internal/transaction -cover
 ```
 
-Expected: все PASS, lint 0 issues, writer coverage не ниже 80%; зафиксируй фактический процент. Проверь отсутствие temp files/artifacts и `git status --short`.
+Expected: все PASS, lint 0 issues, coverage пакета `internal/transaction` не ниже 80%; зафиксируй фактический процент. Проверь отсутствие temp files/artifacts и `git status --short`.
 
 ```bash
-git add internal/writer README.md
+git add internal/transaction README.md
 git commit -m "feat: rotate backups after successful transactions"
 ```
 
