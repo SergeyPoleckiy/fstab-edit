@@ -6,6 +6,7 @@ package transaction
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -167,6 +168,10 @@ func TestExecuteSuccessRealBackupReplace(t *testing.T) {
 	if result.Backup.Metadata.SourcePath != target.Path {
 		t.Fatalf("source path metadata: получено %q", result.Backup.Metadata.SourcePath)
 	}
+	sourceHash := sha256.Sum256([]byte(validTarget))
+	if result.Backup.Metadata.SourceSHA256 != hex.EncodeToString(sourceHash[:]) {
+		t.Fatalf("source SHA-256 metadata: получено %q", result.Backup.Metadata.SourceSHA256)
+	}
 	if result.Backup.Metadata.Operation != backup.OperationBeforeEdit {
 		t.Fatalf("operation metadata: получено %q", result.Backup.Metadata.Operation)
 	}
@@ -205,6 +210,68 @@ func TestExecuteNoOpSkipsLockBackupAndReplace(t *testing.T) {
 	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("no-op не должен вызывать runner: %v", runner.calls)
+	}
+	assertTargetBytes(t, target.Path, []byte(validTarget))
+}
+
+// TestExecuteNoOpNeverCallsMutationSeams доказывает no-op invariant через счётчики:
+// регрессия, переместившая lock/backup/replace/verification до no-op return, будет
+// немедленно замечена, а не проявится как скрытый side effect.
+func TestExecuteNoOpNeverCallsMutationSeams(t *testing.T) {
+	target := newValidTarget(t)
+	lockAcquires, verifyCandidateCalls, createCalls, openCalls := 0, 0, 0, 0
+	replaceCalls, verifyTargetCalls, readBackupCalls, rotateCalls := 0, 0, 0, 0
+	operations := transactionOperations{
+		readSnapshot: writer.ReadSnapshot,
+		acquireLock: func(context.Context, string, time.Duration) (transactionLock, error) {
+			lockAcquires++
+			return &fakeLock{}, nil
+		},
+		verifyCandidate: func(context.Context, sysutil.CommandRunner, []byte) sysutil.Verification {
+			verifyCandidateCalls++
+			return successfulVerification()
+		},
+		createBackup: func(writer.Snapshot, backup.CreateOptions) (backup.Backup, error) {
+			createCalls++
+			return backup.Backup{}, nil
+		},
+		openBackup: func(string) (backup.Backup, error) {
+			openCalls++
+			return backup.Backup{}, nil
+		},
+		replace: func(string, []byte) (writer.ReplaceResult, error) {
+			replaceCalls++
+			return writer.ReplaceResult{}, nil
+		},
+		verifyTarget: func(context.Context, sysutil.CommandRunner, string) sysutil.Verification {
+			verifyTargetCalls++
+			return successfulVerification()
+		},
+		readBackupSnapshot: func(string) (writer.Snapshot, error) {
+			readBackupCalls++
+			return writer.Snapshot{}, nil
+		},
+		rotate: func(string, string, string, int, []string) (backup.RotationResult, error) {
+			rotateCalls++
+			return emptyRotationResult(), nil
+		},
+	}
+
+	result, err := executeWithOperations(context.Background(), Plan{
+		TargetPath: target.Path,
+		Candidate:  []byte(validTarget),
+		Operation:  backup.OperationManual,
+	}, Options{}, operations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Changed {
+		t.Fatal("no-op Changed должен быть false")
+	}
+	total := lockAcquires + verifyCandidateCalls + createCalls + openCalls + replaceCalls + verifyTargetCalls + readBackupCalls + rotateCalls
+	if total != 0 {
+		t.Fatalf("no-op вызвал mutation seams: lock=%d verifyCandidate=%d create=%d open=%d replace=%d verifyTarget=%d readBackup=%d rotate=%d",
+			lockAcquires, verifyCandidateCalls, createCalls, openCalls, replaceCalls, verifyTargetCalls, readBackupCalls, rotateCalls)
 	}
 	assertTargetBytes(t, target.Path, []byte(validTarget))
 }
