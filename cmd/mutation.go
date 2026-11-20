@@ -13,6 +13,7 @@ import (
 
 	"fstab-edit/internal/cliapp"
 	"fstab-edit/internal/editor"
+	"fstab-edit/internal/i18n"
 	"fstab-edit/internal/output"
 	"fstab-edit/internal/transaction"
 )
@@ -41,7 +42,8 @@ func (a *App) buildAddCommand() *cobra.Command {
 			}
 			for _, field := range required {
 				if !cmd.Flags().Changed(field.name[2:]) || field.value == "" {
-					return cliapp.UsageError(nil, "add требует непустой флаг %s", field.name)
+					return cliapp.UsageErrorK(nil, "error.usage.add_requires",
+						"add требует непустой флаг %s", field.name)
 				}
 			}
 			newEntry := editor.NewEntry{
@@ -93,14 +95,16 @@ func (a *App) buildEditCommand() *cobra.Command {
 				return exitErr
 			}
 			if cmd.Flags().Changed("comment") && clearComment {
-				return cliapp.UsageError(nil, "флаги --comment и --clear-comment несовместимы: выберите один")
+				return cliapp.UsageErrorK(nil, "error.usage.comment_conflict",
+					"флаги --comment и --clear-comment несовместимы: выберите один")
 			}
 			changed := cmd.Flags().Changed("device") || cmd.Flags().Changed("mount") ||
 				cmd.Flags().Changed("type") || cmd.Flags().Changed("options") ||
 				cmd.Flags().Changed("dump") || cmd.Flags().Changed("pass") ||
 				cmd.Flags().Changed("comment") || clearComment || unsetDump || unsetPass
 			if !changed {
-				return cliapp.UsageError(nil, "edit требует хотя бы один изменяющий флаг: --device, --mount, --type, --options, --dump, --pass, --comment, --clear-comment, --unset-dump, --unset-pass")
+				return cliapp.UsageErrorK(nil, "error.usage.edit_no_changes",
+					"edit требует хотя бы один изменяющий флаг: --device, --mount, --type, --options, --dump, --pass, --comment, --clear-comment, --unset-dump, --unset-pass")
 			}
 			changes := editor.Changes{
 				UnsetDump:    unsetDump,
@@ -238,12 +242,12 @@ func (a *App) finishMutation(target string, preview *cliapp.MutationPreview) err
 	// Валидация candidate строго до подтверждения: --yes её не обходит.
 	if preview.Report.HasErrors() {
 		a.renderMutation(preview, target, nil)
-		return cliapp.ValidationError(nil,
+		return cliapp.ValidationErrorK(nil, "error.validation.mutation_blocked",
 			"кандидат не прошёл внутреннюю проверку (severity=error), изменения не сохранены")
 	}
 	if !preview.Changed {
 		a.renderMutation(preview, target, nil)
-		a.writeStderr("изменений нет: target не изменён, backup и lock не создавались\n")
+		a.writeStderr(i18n.T(a.lang, "status.no_changes") + "\n")
 		return nil
 	}
 	if a.flags.dryRun {
@@ -255,7 +259,7 @@ func (a *App) finishMutation(target string, preview *cliapp.MutationPreview) err
 		return exitErr
 	}
 	if !proceed {
-		a.writeStderr("операция отменена пользователем: target не изменён\n")
+		a.writeStderr(i18n.T(a.lang, "status.cancelled") + "\n")
 		return nil
 	}
 	executed, runErr := a.service.RunMutation(contextForHandlers(), target, *preview,
@@ -268,7 +272,7 @@ func (a *App) finishMutation(target string, preview *cliapp.MutationPreview) err
 		if errors.As(runErr, &mutationErr) {
 			return mutationErr
 		}
-		return ioError("сохранить изменения", target, runErr)
+		return ioError("error.io.save_changes", "сохранить изменения %s", target, runErr)
 	}
 	return nil
 }
@@ -279,7 +283,7 @@ func (a *App) finishMutation(target string, preview *cliapp.MutationPreview) err
 func (a *App) renderMutation(preview *cliapp.MutationPreview, target string, executed *transaction.TransactionResult) {
 	data, err := output.RenderMutation(preview, target, a.flags.dryRun, executed, a.format())
 	if err != nil {
-		a.writeStderr("не удалось сформировать вывод результата: " + err.Error() + "\n")
+		a.writeStderr(i18n.T(a.lang, "status.render_failed") + err.Error() + "\n")
 		return
 	}
 	a.writeStdout(data)

@@ -344,6 +344,8 @@ func TestAmbiguousSelectorInteractiveChoice(t *testing.T) {
 		TTY:     func() bool { return true },
 		Runner:  &fakeRunner{},
 		Chooser: fixedChooser{line: 2},
+		Getenv:  func(string) string { return "" },
+		Environ: func() []string { return nil },
 	})
 
 	code := app.Execute([]string{
@@ -362,6 +364,8 @@ func TestAmbiguousSelectorInteractiveChoice(t *testing.T) {
 		TTY:     func() bool { return true },
 		Runner:  &fakeRunner{},
 		Chooser: fixedChooser{line: 2},
+		Getenv:  func(string) string { return "" },
+		Environ: func() []string { return nil },
 	})
 	code = app.Execute([]string{
 		"edit", "--file", target, "--mount-point", "/mnt/dup", "--options", "defaults",
@@ -647,6 +651,10 @@ func TestExitMappingIntegration(t *testing.T) {
 				Stdin:  strings.NewReader(""),
 				TTY:    func() bool { return false },
 				Runner: &fakeRunner{},
+				// Getenv/Environ инъектируют пустое окружение: default
+				// язык детерминированно "ru" независимо от LANG машины.
+				Getenv:  func(string) string { return "" },
+				Environ: func() []string { return nil },
 				Dependencies: &cliapp.Dependencies{
 					ExecuteTransaction: func(_ context.Context, _ transaction.Plan, _ transaction.Options) (transaction.TransactionResult, error) {
 						return transaction.TransactionResult{
@@ -715,11 +723,15 @@ func TestMutationPreviewValidationErrorBlocksTransaction(t *testing.T) {
 	probe := &transactionProbe{}
 	buffers := &appBuffers{}
 	app := cmd.NewApp(cmd.AppOptions{
-		Stdout:       &buffers.stdout,
-		Stderr:       &buffers.stderr,
-		Stdin:        strings.NewReader(""),
-		TTY:          func() bool { return false },
-		Runner:       &fakeRunner{},
+		Stdout: &buffers.stdout,
+		Stderr: &buffers.stderr,
+		Stdin:  strings.NewReader(""),
+		TTY:    func() bool { return false },
+		Runner: &fakeRunner{},
+		// Getenv/Environ инъектируют пустое окружение: default язык
+		// детерминированно "ru" независимо от LANG машины.
+		Getenv:       func(string) string { return "" },
+		Environ:      func() []string { return nil },
 		Dependencies: probe.dependencies(true),
 	})
 
@@ -758,11 +770,15 @@ func TestNoOpEditSkipsTransactionAndBackup(t *testing.T) {
 	probe := &transactionProbe{}
 	buffers := &appBuffers{}
 	app := cmd.NewApp(cmd.AppOptions{
-		Stdout:       &buffers.stdout,
-		Stderr:       &buffers.stderr,
-		Stdin:        strings.NewReader(""),
-		TTY:          func() bool { return false },
-		Runner:       &fakeRunner{},
+		Stdout: &buffers.stdout,
+		Stderr: &buffers.stderr,
+		Stdin:  strings.NewReader(""),
+		TTY:    func() bool { return false },
+		Runner: &fakeRunner{},
+		// Getenv/Environ инъектируют пустое окружение: default язык
+		// детерминированно "ru" независимо от LANG машины.
+		Getenv:       func(string) string { return "" },
+		Environ:      func() []string { return nil },
 		Dependencies: probe.dependencies(true),
 	})
 

@@ -13,11 +13,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"fstab-edit/internal/cliapp"
+	"fstab-edit/internal/i18n"
 	"fstab-edit/internal/output"
 	"fstab-edit/internal/parser"
 	"fstab-edit/internal/sysutil"
@@ -35,7 +38,9 @@ const defaultTarget = "/etc/fstab"
 var logLevels = map[string]struct{}{"debug": {}, "info": {}, "warn": {}, "error": {}}
 
 // languages — допустимые значения флага --lang. Полные каталоги RU/EN
-// реализуются следующим блоком; текущие сообщения — на русском.
+// реализованы в internal/i18n; --lang по умолчанию пуст: язык резолвится
+// из окружения и локали (приоритет ТЗ §15: --lang > FSTAB_EDIT_LANG >
+// LC_ALL > LANG > ru).
 var languages = map[string]struct{}{"ru": {}, "en": {}}
 
 // AppOptions описывает внешние зависимости App. Nil writers заменяются
@@ -61,6 +66,13 @@ type AppOptions struct {
 	Chooser cliapp.Chooser
 	// Dependencies перекрывает выбранные production-зависимости Service.
 	Dependencies *cliapp.Dependencies
+	// Getenv читает переменные окружения при резолве языка (LC_ALL, LANG);
+	// nil — production os.Getenv. Тесты подменяют для детерминированного
+	// выбора языка независимо от локали машины прогона.
+	Getenv func(string) string
+	// Environ возвращает окружение при резолве языка (FSTAB_EDIT_LANG);
+	// nil — production os.Environ. Семантика — как у Getenv.
+	Environ func() []string
 }
 
 // App связывает Cobra root command, глобальные флаги и доменный Service.
@@ -71,6 +83,10 @@ type App struct {
 	flags   globalFlags
 	stdin   *bufio.Reader
 	root    *cobra.Command
+	// lang — язык, выбранный резолвом в начале Execute: все prompt-строки,
+	// диагностика и help-тексты печатаются на нём. Заполняется до
+	// root.Execute, поэтому handler'ы читают поле, а не флаг.
+	lang string
 }
 
 // globalFlags хранит значения persistent-флагов корня; заполняются Cobra
@@ -100,6 +116,12 @@ func NewApp(options AppOptions) *App {
 	}
 	if options.Stdin == nil {
 		options.Stdin = strings.NewReader("")
+	}
+	if options.Getenv == nil {
+		options.Getenv = os.Getenv
+	}
+	if options.Environ == nil {
+		options.Environ = os.Environ
 	}
 	if options.Version == "" {
 		options.Version = "dev"
@@ -159,10 +181,17 @@ func mergeDependencies(base, override cliapp.Dependencies) cliapp.Dependencies {
 }
 
 // Execute запускает root command с заданными аргументами и возвращает exit
-// code процесса. Cobra-ошибки (неизвестный флаг, некорректные аргументы)
-// отображаются на code 2 с русским сообщением; *cliapp.ExitError сохраняет
-// свой код и публикует сообщение со списком кандидатов в stderr.
+// code процесса. Язык резолвится до построения help-текстов: pre-scan args на
+// --lang/--lang= (последнее вхождение), иначе env/локаль; дерево команд
+// переводится localize до root.Execute, поэтому --help получает уже
+// переведённые Short/usage. Cobra-ошибки (неизвестный флаг, некорректные
+// аргументы) отображаются на code 2 с сообщением выбранного языка;
+// *cliapp.ExitError сохраняет свой код и публикует сообщение со списком
+// кандидатов в stderr.
 func (a *App) Execute(args []string) int {
+	a.lang = i18n.Resolve(scanLangFlag(args), a.options.Environ(),
+		a.options.Getenv("LC_ALL"), a.options.Getenv("LANG"))
+	a.localize(a.lang)
 	a.root.SetArgs(args)
 	err := a.root.Execute()
 	if err == nil {
@@ -174,24 +203,113 @@ func (a *App) Execute(args []string) int {
 		return exitErr.Code
 	}
 	// Ошибки разбора флагов и аргументов Cobra не типизированы доменом;
-	// для пользователя это usage error, сообщение сохраняется как есть.
+	// для пользователя это usage error, сообщение переводится по ключу.
 	// Writers App — память или потоки процесса; игнорирование ошибки записи
 	// здесь допустимо, как и в пакете output.
-	_, _ = fmt.Fprintf(a.options.Stderr, "некорректный флаг или аргументы: %v\n", err)
+	_, _ = fmt.Fprintln(a.options.Stderr, i18n.Tf(a.lang, "error.usage.bad_flag", err))
 	return cliapp.ExitUsage
 }
 
-// printExitError публикует диагностику ExitError в stderr: сообщение с
-// сохранённой причиной и, при неоднозначности, список candidate lines.
-// Prompt и diff handler'ы уже напечатаны к этому моменту отдельно.
+// scanLangFlag находит последнее вхождение --lang <v> или --lang=<v> в args.
+// Невалидное значение не отклоняется здесь: Resolve проигнорирует его и
+// перейдёт на следующий уровень (env/локаль), а validateGlobalFlags отклонит
+// оставшееся валидным usage error.
+func scanLangFlag(args []string) string {
+	lang := ""
+	for i, arg := range args {
+		if value, ok := strings.CutPrefix(arg, "--lang="); ok {
+			lang = value
+			continue
+		}
+		if arg == "--lang" && i+1 < len(args) {
+			lang = args[i+1]
+		}
+	}
+	return lang
+}
+
+// localize переводит Short/Long корня и всех подкоманд и usage-строки
+// persistent/локальных флагов из каталога выбранного языка. Ключи:
+// help.root.short, help.cmd.<use-префикс>.short, help.flag.<имя>. Ключи,
+// которых нет в каталогах, оставляют текущий русский текст (T() вернул бы
+// сам ключ) — поэтому замена выполняется только при i18n.Has. Inherited-флаги
+// не трогаются: это те же объекты, что persistent-флаги родителя, и они уже
+// переведены при обходе корня.
+func (a *App) localize(lang string) {
+	a.localizeCommand(a.root, lang, "help.root.short")
+	for _, command := range a.root.Commands() {
+		a.localizeSubtree(command, lang)
+	}
+}
+
+// localizeSubtree рекурсивно переводит команду и всех её потомков.
+func (a *App) localizeSubtree(command *cobra.Command, lang string) {
+	a.localizeCommand(command, lang, "help.cmd."+usePrefix(command.Use)+".short")
+	for _, child := range command.Commands() {
+		a.localizeSubtree(child, lang)
+	}
+}
+
+// localizeCommand переводит Short, Long (если задан) и usage флагов одной
+// команды по ключу shortKey для Short.
+func (a *App) localizeCommand(command *cobra.Command, lang, shortKey string) {
+	if i18n.Has(shortKey) {
+		command.Short = i18n.T(lang, shortKey)
+	}
+	longKey := strings.Replace(shortKey, ".short", ".long", 1)
+	if command.Long != "" && i18n.Has(longKey) {
+		command.Long = i18n.T(lang, longKey)
+	}
+	localizeFlags(command.PersistentFlags(), lang)
+	localizeFlags(command.Flags(), lang)
+}
+
+// localizeFlags переводит usage-строки флагов набора по ключу
+// help.flag.<имя>: имя флага уникально в пределах CLI, поэтому один ключ
+// обслуживает и persistent, и локальные флаги всех команд. Дефисы имени
+// флага (dry-run) заменяются на подчёркивания — таков формат ключей каталога.
+func localizeFlags(flags *pflag.FlagSet, lang string) {
+	flags.VisitAll(func(flag *pflag.Flag) {
+		key := "help.flag." + strings.ReplaceAll(flag.Name, "-", "_")
+		if i18n.Has(key) {
+			flag.Usage = i18n.T(lang, key)
+		}
+	})
+}
+
+// usePrefix возвращает префикс Use команды до первого пробела или '<':
+// "delete <id>" → "delete", "rollback [backup-id]" → "rollback".
+func usePrefix(use string) string {
+	if index := strings.IndexAny(use, " <"); index >= 0 {
+		return use[:index]
+	}
+	return use
+}
+
+// printExitError публикует диагностику ExitError в stderr: при непустом
+// MessageKey сообщение форматируется из каталога выбранного языка (русский
+// Message остаётся fallback через Error()), иначе печатается Message как есть.
+// При неоднозначности добавляется список candidate lines по ключу
+// prompt.candidates. Prompt и diff handler'ы уже напечатаны к этому моменту
+// отдельно.
 func (a *App) printExitError(exitErr *cliapp.ExitError) {
-	_, _ = fmt.Fprintln(a.options.Stderr, exitErr.Error())
+	message := exitErr.Error()
+	if exitErr.MessageKey != "" {
+		// Перевод форматируется теми же MessageArgs; сохранённая причина
+		// дописывается, чтобы диагностика не теряла исходную ошибку нижнего
+		// слоя, как это делает Error().
+		message = i18n.Tf(a.lang, exitErr.MessageKey, exitErr.MessageArgs...)
+		if exitErr.Cause != nil && exitErr.Cause.Error() != "" {
+			message = fmt.Sprintf("%s: %v", message, exitErr.Cause)
+		}
+	}
+	_, _ = fmt.Fprintln(a.options.Stderr, message)
 	if len(exitErr.Candidates) > 0 {
 		lines := make([]string, len(exitErr.Candidates))
 		for i, line := range exitErr.Candidates {
 			lines[i] = fmt.Sprintf("%d", line)
 		}
-		_, _ = fmt.Fprintf(a.options.Stderr, "кандидаты: строки %s\n", strings.Join(lines, ", "))
+		_, _ = fmt.Fprintln(a.options.Stderr, i18n.Tf(a.lang, "prompt.candidates", strings.Join(lines, ", ")))
 	}
 }
 
@@ -228,7 +346,7 @@ func (a *App) buildRootCommand() *cobra.Command {
 	flags.BoolVarP(&a.flags.quiet, "quiet", "q", false, "подавить обычный stdout (ошибки сохраняются)")
 	flags.StringVar(&a.flags.backupDir, "backup-dir", "", "каталог резервных копий (по умолчанию — каталог target)")
 	flags.BoolVar(&a.flags.offline, "offline", false, "отключить проверки внешних ресурсов")
-	flags.StringVar(&a.flags.lang, "lang", "ru", "язык сообщений: ru, en")
+	flags.StringVar(&a.flags.lang, "lang", "", "язык сообщений: ru, en (по умолчанию — авто-резолв из окружения)")
 	flags.StringVar(&a.flags.config, "config", "", "путь к YAML-конфигурации")
 
 	root.AddCommand(
@@ -248,22 +366,30 @@ func (a *App) buildRootCommand() *cobra.Command {
 
 // validateGlobalFlags отклоняет некорректные комбинации глобальных флагов
 // до command handler: формат вывода, уровень журнала, язык и конфликт
-// verbose/quiet. Logger, config loader и полные переводы — следующий блок,
-// поэтому --log-level/--lang/--config здесь только валидируются.
+// verbose/quiet. Сообщения формируются K-конструкторами с i18n-ключами:
+// точка печати (printExitError) переводит их выбранным языком. Пустой --lang
+// означает авто-резолв из окружения и допустим; валидируются только явные
+// значения.
 func (a *App) validateGlobalFlags() error {
 	switch output.Format(a.flags.output) {
 	case output.FormatTable, output.FormatJSON, output.FormatCSV, output.FormatTSV:
 	default:
-		return cliapp.UsageError(nil, "неизвестный формат вывода %q: допустимы table, json, csv, tsv", a.flags.output)
+		return cliapp.UsageErrorK(nil, "error.usage.unknown_output",
+			"неизвестный формат вывода %q: допустимы table, json, csv, tsv", a.flags.output)
 	}
 	if _, ok := logLevels[a.flags.logLevel]; !ok {
-		return cliapp.UsageError(nil, "некорректный --log-level %q: допустимы debug, info, warn, error", a.flags.logLevel)
+		return cliapp.UsageErrorK(nil, "error.usage.bad_log_level",
+			"некорректный --log-level %q: допустимы debug, info, warn, error", a.flags.logLevel)
 	}
-	if _, ok := languages[a.flags.lang]; !ok {
-		return cliapp.UsageError(nil, "некорректный --lang %q: допустимы ru, en", a.flags.lang)
+	if a.flags.lang != "" {
+		if _, ok := languages[a.flags.lang]; !ok {
+			return cliapp.UsageErrorK(nil, "error.usage.bad_lang",
+				"некорректный --lang %q: допустимы ru, en", a.flags.lang)
+		}
 	}
 	if a.flags.verbose && a.flags.quiet {
-		return cliapp.UsageError(nil, "флаги --verbose и --quiet несовместимы: выберите один режим вывода")
+		return cliapp.UsageErrorK(nil, "error.usage.verbose_quiet",
+			"флаги --verbose и --quiet несовместимы: выберите один режим вывода")
 	}
 	return nil
 }
@@ -297,18 +423,22 @@ func (a *App) writeStderr(text string) {
 func (a *App) loadDocument(target string) (*models.Document, *cliapp.ExitError) {
 	snapshot, err := writer.ReadSnapshot(target)
 	if err != nil {
-		return nil, ioError("прочитать target", target, err)
+		return nil, ioError("error.io.read_target", "прочитать target %s", target, err)
 	}
 	return parser.Parse(snapshot.Data), nil
 }
 
-// ioError оформляет сбой ввода-вывода как ExitError code 6 с сохранённой
-// причиной для логирования и разбора через errors.Is/As.
-func ioError(action, target string, cause error) *cliapp.ExitError {
+// ioError оформляет сбой ввода-вывода как ExitError code 6 с i18n-ключом:
+// printExitError переведёт сообщение выбранным языком, русский Message
+// остаётся fallback для Error() и логов. MessageArgs совпадают с аргументами
+// ключа каталога (перевод форматируется теми же значениями).
+func ioError(key, format, target string, cause error) *cliapp.ExitError {
 	return &cliapp.ExitError{
-		Code:    cliapp.ExitIO,
-		Message: fmt.Sprintf("не удалось %s %s", action, target),
-		Cause:   cause,
+		Code:        cliapp.ExitIO,
+		Message:     "не удалось " + fmt.Sprintf(format, target),
+		MessageKey:  key,
+		MessageArgs: []any{target},
+		Cause:       cause,
 	}
 }
 
@@ -323,14 +453,15 @@ func (a *App) interactive() bool {
 // оставался чистым; переданные warnings уже отфильтрованы по severity
 // вызывающим кодом (previewWarnings — единственная точка фильтрации).
 // --yes пропускает prompt после валидации preview; non-TTY без --yes
-// отклоняется usage error; пустой ответ, EOF и любое значение кроме y/yes
+// отклоняется usage error; формы «да» определяются i18n.AcceptYes выбранного
+// языка (ru: д/да/y/yes, en: y/yes); пустой ответ, EOF и любая прочая строка
 // трактуются как отказ (default No).
 func (a *App) confirm(diff string, warnings []models.Diagnostic) (bool, *cliapp.ExitError) {
 	if a.flags.yes {
 		return true, nil
 	}
 	if !a.interactive() {
-		return false, cliapp.UsageError(nil,
+		return false, cliapp.UsageErrorK(nil, "error.usage.no_tty",
 			"подтверждение требует TTY: в неинтерактивном режиме используйте --yes")
 	}
 	if diff != "" {
@@ -342,18 +473,13 @@ func (a *App) confirm(diff string, warnings []models.Diagnostic) (bool, *cliapp.
 	for _, diagnostic := range warnings {
 		a.writeStderr(fmt.Sprintf("warning: %s\n", diagnostic.Message))
 	}
-	a.writeStderr("Применить изменения? [y/N] ")
+	a.writeStderr(i18n.T(a.lang, "prompt.apply_changes"))
 	answer, err := a.stdin.ReadString('\n')
 	answer = strings.TrimSpace(answer)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, nil
 	}
-	switch strings.ToLower(answer) {
-	case "y", "yes":
-		return true, nil
-	default:
-		return false, nil
-	}
+	return i18n.AcceptYes(a.lang, answer), nil
 }
 
 // previewWarnings — единственная точка фильтрации warning-диагностики

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"fstab-edit/internal/cliapp"
+	"fstab-edit/internal/i18n"
 	"fstab-edit/internal/output"
 )
 
@@ -28,7 +29,7 @@ func (a *App) buildRollbackCommand() *cobra.Command {
 				positional = args[0]
 			}
 			if positional != "" && restoreID != "" {
-				return cliapp.UsageError(nil,
+				return cliapp.UsageErrorK(nil, "error.usage.restore_twice",
 					"источник restore ID задан дважды: используйте либо позиционный аргумент, либо --restore")
 			}
 			if positional != "" {
@@ -69,7 +70,7 @@ func (a *App) executeRollback(restoreID string) error {
 		return exitErr
 	}
 	if !proceed {
-		a.writeStderr("откат отменён пользователем: target не изменён\n")
+		a.writeStderr(i18n.T(a.lang, "status.rollback_cancelled") + "\n")
 		return nil
 	}
 	result, exitErr := a.service.Rollback(contextForHandlers(), target, request)
@@ -93,7 +94,7 @@ func (a *App) renderRollback(result cliapp.RollbackResult, target string) {
 	}
 	data, err := output.RenderRollback(info, a.format())
 	if err != nil {
-		a.writeStderr("не удалось сформировать вывод результата: " + err.Error() + "\n")
+		a.writeStderr(i18n.T(a.lang, "status.render_failed") + err.Error() + "\n")
 		return
 	}
 	a.writeStdout(data)

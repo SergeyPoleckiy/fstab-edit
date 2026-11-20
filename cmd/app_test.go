@@ -50,13 +50,17 @@ type appBuffers struct {
 
 // newApp создаёт App с заданным stdin/TTY и fake runner. Все writers —
 // memory buffers, поэтому тесты не касаются реальных потоков процесса.
+// Getenv/Environ инъектируют пустое окружение: default язык детерминированно
+// "ru" независимо от LANG/LC_ALL машины прогона тестов.
 func newApp(buffers *appBuffers, stdin io.Reader, tty bool, runner *fakeRunner) *cmd.App {
 	return cmd.NewApp(cmd.AppOptions{
-		Stdout: &buffers.stdout,
-		Stderr: &buffers.stderr,
-		Stdin:  stdin,
-		TTY:    func() bool { return tty },
-		Runner: runner,
+		Stdout:  &buffers.stdout,
+		Stderr:  &buffers.stderr,
+		Stdin:   stdin,
+		TTY:     func() bool { return tty },
+		Runner:  runner,
+		Getenv:  func(string) string { return "" },
+		Environ: func() []string { return nil },
 	})
 }
 
