@@ -71,10 +71,9 @@ func rollbackDependencies(events *rollbackEvents) cliapp.Dependencies {
 	}
 }
 
-// countingSeam считает вызовы границы и при необходимости возвращает ошибку.
+// countingSeam считает вызовы границы отказа.
 type countingSeam struct {
 	calls int
-	err   error
 }
 
 // prepareRollbackFixture создаёт target с текущим содержимым current и два

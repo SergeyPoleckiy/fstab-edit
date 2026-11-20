@@ -10,7 +10,7 @@
 
 ## Статус
 
-- Текущий этап: **1 — ядро и CLI**.
+- Текущий этап: **1 — ядро и CLI**. CLI реализован и собирается в статический бинарь `fstab-edit`; TUI остаётся будущим этапом.
 - Реализованы модель данных, lossless parser, selectors и in-memory mutations: Add, Edit, Delete, Comment и Uncomment, включая связанные comment blocks.
 - Реализованы публичная модель diagnostics и внутренний read-only validator: проверки полей, source/mount/FS type, опций, duplicates и специальные предупреждения работают детерминированно с документом в памяти.
 - Реализован secure runner: исполняемые файлы разрешаются только в фиксированных системных каталогах, аргументы передаются без shell, локаль фиксируется как `LC_ALL=C`. По умолчанию действуют timeout **10 секунд** и ограничение **64 KiB на каждый поток** stdout/stderr.
@@ -18,16 +18,80 @@
 - Классификация вывода проверена на fixtures наблюдённого формата **util-linux 2.42.4**. `findmnt` только статически проверяет файл-кандидат и ничего не монтирует.
 - Raw stdout/stderr потенциально содержат sensitive-данные и не предназначены для записи в журнал без redaction; публичный `Report` содержит только обобщённые диагностики, а исходный вывод хранится отдельно в `Execution`.
 - Реализованы secure snapshot/base-hash conflict, стабильные flock и низкоуровневый атомарный `Replace` с сохранением metadata/xattrs. Реализованы backup и ротация: `Create`, `Open`, `List`, `Select` и `Rotate` в `internal/backup`.
-- Реализована доменная transaction в `internal/transaction`: internal validation, lock, повторный base SHA-256, `findmnt` candidate check, backup текущей операции, atomic replace, post-check, один automatic rollback и ротация после полного успеха. CLI, prompt, diff, dry-run, обязательный logger/config и manual rollback ещё не подключены; тесты работают только с временными файлами и не изменяют реальный `/etc/fstab`.
+- Реализована доменная transaction в `internal/transaction`: internal validation, lock, повторный base SHA-256, `findmnt` candidate check, backup текущей операции, atomic replace, post-check, один automatic rollback и ротация после полного успеха.
+- Реализован CLI на Cobra (`cmd/`, `main.go`): десять команд `list`, `add`, `edit`, `delete`, `comment`, `uncomment`, `validate`, `verify-mount`, `backup`, `rollback`; dry-run, подтверждения `[y/N]`, unified diff, селекторы записей с кодом неоднозначности 8 и форматы вывода `table`/`json`/`csv`/`tsv` со `schema_version: 1`. Тесты CLI работают только с временными файлами, fake runner и scripted stdin; реальный `/etc/fstab` и findmnt не затрагиваются.
+- **Ограничения текущего блока**: флаги `--log-level`, `--lang` и `--config` принимаются и валидируются, но logger, YAML-config loader и полные каталоги i18n RU/EN реализуются следующим блоком; текущие пользовательские сообщения — на русском. Обязательный structured logger в `validate`/`verify-mount` и команда `tui` пока не подключены.
 - Актуальная основа разработки: [ТЗ версии 2.0](../fstab-editor-v2.md).
 - Исходная редакция сохранена: [ТЗ версии 1.0](../fstab-editor.md).
+
+## CLI
+
+Сборка и справка:
+
+```bash
+go build -o fstab-edit .
+./fstab-edit --help
+./fstab-edit --version
+```
+
+По умолчанию целевой файл — `/etc/fstab`; флаг `--file=<path>` переопределяет его (удобно для chroot и тестов). Флаги `--help` и `--version` не читают target и не запускают `findmnt`.
+
+Команды:
+
+| Команда | Назначение |
+|---------|-----------|
+| `list` | Показывает активные и закомментированные записи |
+| `add` | Добавляет новую запись |
+| `edit` | Изменяет выбранные поля/comment |
+| `delete` | Удаляет запись |
+| `comment` | Комментирует активную запись |
+| `uncomment` | Включает закомментированную запись |
+| `validate` | Проверяет документ (`--offline` — только внутренний validator) |
+| `verify-mount` | Статический `findmnt --verify` по фактическим байтам target |
+| `backup` | Создаёт ручную копию без изменения target |
+| `rollback` | Восстанавливает выбранную копию |
+
+Селектор записи — позиционный `<id>` (номер строки, mount point или source) либо ровно один из `--line`, `--mount-point`, `--device`; несколько совпадений дают exit code **8** со списком кандидатов. `add` требует `--device`, `--mount`, `--type`, `--options` (dump/pass по умолчанию `0`); `edit` требует селектор и хотя бы один изменяющий флаг.
+
+Подтверждение `[y/N]` (по умолчанию отказ) обязательно для мутаций и `rollback`: без TTY требуется `--yes`, при этом `--yes` не обходит ошибки валидации, неоднозначность селектора и внешние сбои. `--dry-run` показывает diff и diagnostics, ничего не меняя и не требуя `--yes`.
+
+Форматы вывода `--output=table|json|csv|tsv`; JSON — `schema_version: 1`. Обычные данные — stdout (ровно один structured document для machine-форматов), диагностика, diff и prompts — stderr. Exit codes: 0 успех (warnings допустимы), 1 validation, 2 usage, 3 права, 4 lock/base conflict, 5 внешняя утилита, 6 I/O/backup/write, 7 критический rollback (наивысший приоритет), 8 неоднозначный селектор.
+
+Примеры:
+
+```bash
+fstab-edit list
+fstab-edit list -o json
+
+fstab-edit add --device UUID=abc-123 --mount /mnt/data --type ext4 \
+    --options defaults,noatime --dump 0 --pass 2
+
+fstab-edit edit --mount-point /mnt/data --options defaults,noatime,nofail
+fstab-edit delete --mount-point /mnt/data --yes
+
+fstab-edit comment --line 12
+fstab-edit uncomment --line 12
+
+fstab-edit validate --file ./fstab.test --offline
+fstab-edit verify-mount --file ./fstab.test
+
+fstab-edit backup --file ./fstab.test
+fstab-edit rollback --dry-run
+fstab-edit rollback --restore=2026-11-18_15-30-45.123456789Z
+```
+
+Тесты CLI не используют реальный `/etc/fstab`: все сценарии работают с временными файлами, fake runner и scripted stdin.
 
 ## Структура проекта
 
 ```text
 work/
-├── cmd/                  # Команды Cobra (будущий этап)
+├── cmd/                  # Команды Cobra: флаги, prompt, exit mapping
+├── main.go               # Production wiring процессовых зависимостей
 ├── internal/
+│   ├── cliapp/           # Доменный слой CLI: selectors, preview, service, rollback
+│   ├── diff/             # Line-based unified diff для preview
+│   ├── output/           # Renderers table/json/csv/tsv, schema v1
 │   ├── parser/           # Lossless parser и побайтовое сохранение
 │   ├── editor/           # Selectors и in-memory mutations
 │   ├── validator/        # Синтаксическая и семантическая проверка
@@ -50,7 +114,7 @@ work/
 
 ## Безопасность при разработке
 
-Никогда не используйте реальный `/etc/fstab` основной системы для разработки и ручных экспериментов. Тесты findmnt используют fake runner и не запускают внешнюю утилиту; candidate tests работают только с приватными временными файлами. После появления CLI файловые тесты должны использовать временные файлы и опцию `--file`; разрушительные и привилегированные проверки выполняются только в изолированных VM.
+Никогда не используйте реальный `/etc/fstab` основной системы для разработки и ручных экспериментов. Тесты findmnt используют fake runner и не запускают внешнюю утилиту; candidate tests работают только с приватными временными файлами; CLI- и файловые тесты используют временные файлы и опцию `--file`; разрушительные и привилегированные проверки выполняются только в изолированных VM.
 
 ## Требования
 
@@ -91,7 +155,7 @@ golangci-lint run
 4. Post-write warnings допустимы; errors вызывают ровно одну попытку restore backup именно текущей transaction. `Replaced=false` никогда не вызывает rollback.
 5. Успешный rollback возвращает primary error с `RolledBack=true`. Rollback failure возвращает класс `rollback`, сохраняет primary и rollback causes и recovery paths target/backup/metadata.
 6. Rotation выполняется только после полного успешного post-check; backup текущей transaction передаётся protected. Ошибка rotation возвращает класс `rotation_after_success`, но не откатывает уже успешно записанный target.
-7. CLI, prompt, diff rendering, dry-run, обязательный logger/config и manual rollback пока не подключены; transaction возвращает typed `FailureKind` для будущих exit codes.
+7. CLI, prompt, diff rendering, dry-run и manual rollback подключены в `cmd/` и `main.go`; обязательный logger/config остаётся следующим блоком; transaction возвращает typed `FailureKind`, который CLI отображает на стабильные exit codes.
 
 ## Резервные копии и ротация
 
