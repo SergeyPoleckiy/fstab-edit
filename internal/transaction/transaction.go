@@ -237,21 +237,24 @@ func prepareTransaction(plan Plan, operations prepareOperations) (preparedTransa
 	candidateSHA := sha256.Sum256(plan.Candidate)
 	internalReport := models.Report{Diagnostics: make([]models.Diagnostic, 0)}
 	changed := !bytes.Equal(base.Data, plan.Candidate)
-	if changed {
-		internalReport = validator.Validate(parser.Parse(plan.Candidate))
-		if internalReport.HasErrors() {
-			return preparedTransaction{}, transactionFailure(FailureValidation, ErrTransactionValidation,
-				errors.New("candidate содержит диагностики severity=error"), RecoveryPaths{Target: base.Path})
-		}
-	}
-
-	return preparedTransaction{
+	prepared := preparedTransaction{
 		plan:            plan,
 		base:            base,
 		candidateSHA256: candidateSHA,
 		changed:         changed,
 		internalReport:  internalReport,
-	}, nil
+	}
+	if changed {
+		prepared.internalReport = validator.Validate(parser.Parse(plan.Candidate))
+		if prepared.internalReport.HasErrors() {
+			// Partial result возвращается вместе с ошибкой: CLI должен показать
+			// конкретные диагностики candidate, а не только общий validation class.
+			return prepared, transactionFailure(FailureValidation, ErrTransactionValidation,
+				errors.New("candidate содержит диагностики severity=error"), RecoveryPaths{Target: base.Path})
+		}
+	}
+
+	return prepared, nil
 }
 
 // validPlanOperation проверяет operation по полному whitelist backup metadata. Явный

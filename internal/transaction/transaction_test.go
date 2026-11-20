@@ -155,12 +155,25 @@ func TestPrepareTransactionRejectsInvalidOperationBeforeRead(t *testing.T) {
 // без findmnt и lock.
 func TestPrepareTransactionRejectsCorruptCandidate(t *testing.T) {
 	target := newValidTarget(t)
-	_, err := prepareTransaction(Plan{
+	candidate := []byte("not-a-valid-entry\n")
+	prepared, err := prepareTransaction(Plan{
 		TargetPath: target.Path,
-		Candidate:  []byte("not-a-valid-entry\n"),
+		Candidate:  candidate,
 		Operation:  backup.OperationBeforeEdit,
 	}, prepareOperations{readSnapshot: writer.ReadSnapshot})
 	mustTxError(t, err, FailureValidation, ErrTransactionValidation, nil)
+
+	// Диагностики валидации обязаны остаться доступны caller даже при ошибке:
+	// CLI покажет конкретные строки candidate, а не только общий класс failure.
+	if !prepared.changed {
+		t.Fatal("validation failure должен сохранять Changed=true")
+	}
+	if got, want := prepared.candidateSHA256, sha256.Sum256(candidate); got != want {
+		t.Fatalf("candidate SHA-256: получено %x, ожидалось %x", got, want)
+	}
+	if prepared.internalReport.Diagnostics == nil || !prepared.internalReport.HasErrors() {
+		t.Fatalf("validation diagnostics должны быть сохранены в partial result: %#v", prepared.internalReport.Diagnostics)
+	}
 }
 
 // TestPrepareTransactionTargetReadFailure сохраняет конкретную I/O причину target
