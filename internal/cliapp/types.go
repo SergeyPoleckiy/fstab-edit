@@ -21,6 +21,9 @@ const (
 	ExitValidation = 1
 	// ExitUsage означает некорректную комбинацию аргументов командной строки.
 	ExitUsage = 2
+	// ExitPermission означает недостаток прав: небезопасный config, недоступный
+	// журнал. Код 3 ранее был зарезервирован; активируется этим блоком.
+	ExitPermission = 3
 	// ExitConflict означает конфликт доступа: target изменился или lock недоступен.
 	ExitConflict = 4
 	// ExitExternal означает сбой внешней проверки (findmnt).
@@ -47,14 +50,20 @@ var (
 	ErrPermission = errors.New("конфликт доступа")
 )
 
-// ExitError — типизированная ошибка CLI с exit code и сохранённой причиной.
-// Tasks 2–4 будут читать Code и Candidates, чтобы сформировать вывод и код
-// возврата процесса, не разбирая текст сообщений.
+// ExitError — типизированная ошибка CLI. Message — русский fallback для
+// логов и Error(); MessageKey/MessageArgs — i18n-ключ и аргументы: точка
+// печати (cmd) переводит сообщение выбранным языком, доменный слой остаётся
+// чистым от выбора языка. MessageKey == "" означает «нет перевода».
 type ExitError struct {
 	// Code — стабильный exit code процесса.
 	Code int
 	// Message — русское диагностическое сообщение для пользователя.
 	Message string
+	// MessageKey — i18n-ключ сообщения; "" означает «перевода нет».
+	MessageKey string
+	// MessageArgs — аргументы для форматирования перевода (fallback Message
+	// формируется теми же аргументами через fmt.Sprintf).
+	MessageArgs []any
 	// Cause сохраняет исходную ошибку нижележащего слоя; может быть nil.
 	Cause error
 	// Candidates содержит one-based номера строк-кандидатов при Code == 8.
@@ -75,7 +84,8 @@ func (e *ExitError) Error() string {
 // Unwrap сохраняет sentinel cause для errors.Is и errors.As.
 func (e *ExitError) Unwrap() error { return e.Cause }
 
-// newExitError собирает ExitError с копией списка кандидатов.
+// newExitError собирает ExitError без i18n-ключа (MessageKey == "").
+// Используется внутренними call-сайтами пакета cliapp.
 func newExitError(code int, cause error, candidates []int, format string, args ...any) *ExitError {
 	var message string
 	if format != "" {
@@ -89,44 +99,96 @@ func newExitError(code int, cause error, candidates []int, format string, args .
 	}
 }
 
+// NewExitErrorK — общий конструктор ExitError с явным exit code и i18n-ключом.
+// Message строится через fmt.Sprintf с теми же args (key используется как
+// формат: для ключей без глаголов Message совпадает с ключом), поэтому
+// русский fallback для Error() сохраняется.
+func NewExitErrorK(code int, cause error, candidates []int, key string, args ...any) *ExitError {
+	return newExitErrorK(code, cause, candidates, key, key, args...)
+}
+
+// newExitErrorK собирает ExitError с i18n-ключом и копией списка кандидатов.
+// Message формируется через fmt.Sprintf(format, args...) — русский fallback
+// для логов и Error() сохраняется независимо от наличия ключа.
+func newExitErrorK(code int, cause error, candidates []int, key, format string, args ...any) *ExitError {
+	var message string
+	if format != "" {
+		message = fmt.Sprintf(format, args...)
+	}
+	return &ExitError{
+		Code:        code,
+		Message:     message,
+		MessageKey:  key,
+		MessageArgs: append([]any(nil), args...),
+		Cause:       cause,
+		Candidates:  append([]int(nil), candidates...),
+	}
+}
+
 // UsageError создаёт ExitError с code 2 для некорректных аргументов.
 func UsageError(cause error, format string, args ...any) *ExitError {
+	return UsageErrorK(cause, "", format, args...)
+}
+
+// UsageErrorK создаёт ExitError с code 2, i18n-ключом и русским fallback
+// Message. args подставляются и в перевод ключа, и в fallback Message.
+func UsageErrorK(cause error, key, format string, args ...any) *ExitError {
 	if cause == nil {
 		cause = ErrUsage
 	} else {
 		cause = errors.Join(ErrUsage, cause)
 	}
-	return newExitError(ExitUsage, cause, nil, format, args...)
+	return newExitErrorK(ExitUsage, cause, nil, key, format, args...)
 }
 
 // ValidationError создаёт ExitError с code 1 для недопустимых данных или изменений.
 func ValidationError(cause error, format string, args ...any) *ExitError {
+	return ValidationErrorK(cause, "", format, args...)
+}
+
+// ValidationErrorK создаёт ExitError с code 1, i18n-ключом и русским fallback
+// Message. args подставляются и в перевод ключа, и в fallback Message.
+func ValidationErrorK(cause error, key, format string, args ...any) *ExitError {
 	if cause == nil {
 		cause = ErrValidation
 	} else {
 		cause = errors.Join(ErrValidation, cause)
 	}
-	return newExitError(ExitValidation, cause, nil, format, args...)
+	return newExitErrorK(ExitValidation, cause, nil, key, format, args...)
 }
 
 // AmbiguityError создаёт ExitError с code 8 и списком кандидатов.
 func AmbiguityError(cause error, candidates []int, format string, args ...any) *ExitError {
+	return AmbiguityErrorK(cause, candidates, "", format, args...)
+}
+
+// AmbiguityErrorK создаёт ExitError с code 8, списком кандидатов, i18n-ключом
+// и русским fallback Message. args подставляются и в перевод ключа, и в
+// fallback Message.
+func AmbiguityErrorK(cause error, candidates []int, key, format string, args ...any) *ExitError {
 	if cause == nil {
 		cause = ErrAmbiguous
 	} else {
 		cause = errors.Join(ErrAmbiguous, cause)
 	}
-	return newExitError(ExitAmbiguous, cause, candidates, format, args...)
+	return newExitErrorK(ExitAmbiguous, cause, candidates, key, format, args...)
 }
 
-// PermissionError создаёт ExitError с code 4 для конфликтов доступа.
+// PermissionError создаёт ExitError с code 3 для конфликтов доступа.
 func PermissionError(cause error, format string, args ...any) *ExitError {
+	return PermissionErrorK(cause, "", format, args...)
+}
+
+// PermissionErrorK создаёт ExitError с code ExitPermission (3), i18n-ключом
+// и русским fallback Message. args подставляются и в перевод ключа, и в
+// fallback Message.
+func PermissionErrorK(cause error, key, format string, args ...any) *ExitError {
 	if cause == nil {
 		cause = ErrPermission
 	} else {
 		cause = errors.Join(ErrPermission, cause)
 	}
-	return newExitError(ExitConflict, cause, nil, format, args...)
+	return newExitErrorK(ExitPermission, cause, nil, key, format, args...)
 }
 
 // ExitCodeForFailureKind отображает стабильный класс сбоя transaction на exit

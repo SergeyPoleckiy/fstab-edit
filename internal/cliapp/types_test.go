@@ -70,7 +70,7 @@ func TestHelperErrorsFillCodes(t *testing.T) {
 		{"UsageError", cliapp.UsageError(cause, "usage"), 2},
 		{"ValidationError", cliapp.ValidationError(cause, "validation"), 1},
 		{"AmbiguityError", cliapp.AmbiguityError(cause, []int{3, 7}, "ambiguous"), 8},
-		{"PermissionError", cliapp.PermissionError(cause, "permission"), 4},
+		{"PermissionError", cliapp.PermissionError(cause, "permission"), 3},
 	}
 	for _, item := range cases {
 		if item.got.Code != item.want {
