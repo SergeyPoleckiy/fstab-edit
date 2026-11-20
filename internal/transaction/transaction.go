@@ -7,6 +7,7 @@ package transaction
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -269,4 +270,206 @@ func validPlanOperation(operation backup.Operation) bool {
 	default:
 		return false
 	}
+}
+
+// transactionLock — минимальный контракт владения блокировкой, необходимый
+// transaction. Interface позволяет тестам подменять lock без создания файлов.
+type transactionLock interface {
+	Close() error
+}
+
+// transactionOperations — immutable per-call seams доменной оркестрации. Каждая
+// граница отказа (чтение, lock, findmnt, backup, replace) подменяется в tests
+// отдельно, без mutable globals и без запуска внешних утилит.
+type transactionOperations struct {
+	readSnapshot       func(string) (writer.Snapshot, error)
+	acquireLock        func(context.Context, string, time.Duration) (transactionLock, error)
+	verifyCandidate    func(context.Context, sysutil.CommandRunner, []byte) sysutil.Verification
+	createBackup       func(writer.Snapshot, backup.CreateOptions) (backup.Backup, error)
+	openBackup         func(string) (backup.Backup, error)
+	replace            func(string, []byte) (writer.ReplaceResult, error)
+	verifyTarget       func(context.Context, sysutil.CommandRunner, string) sysutil.Verification
+	readBackupSnapshot func(string) (writer.Snapshot, error)
+}
+
+// productionTransactionOperations заполняет seams готовыми проверенными пакетами.
+// Lock acquire оборачивается в transactionLock, сохраняя публичный writer API.
+func productionTransactionOperations() transactionOperations {
+	return transactionOperations{
+		readSnapshot: writer.ReadSnapshot,
+		acquireLock: func(ctx context.Context, path string, timeout time.Duration) (transactionLock, error) {
+			return writer.AcquireLock(ctx, path, timeout)
+		},
+		verifyCandidate: sysutil.VerifyCandidate,
+		createBackup:    backup.Create,
+		openBackup:      backup.Open,
+		replace:         writer.Replace,
+		verifyTarget: func(ctx context.Context, runner sysutil.CommandRunner, path string) sysutil.Verification {
+			return sysutil.NewFindmntVerifier(runner).Verify(ctx, path)
+		},
+		readBackupSnapshot: writer.ReadSnapshot,
+	}
+}
+
+// validateTransactionOperations отклоняет programming error до чтения target или
+// создания lock, чтобы incomplete config не имела частичных side effects.
+func validateTransactionOperations(operations transactionOperations) error {
+	fields := []struct {
+		name    string
+		missing bool
+	}{
+		{name: "readSnapshot", missing: operations.readSnapshot == nil},
+		{name: "acquireLock", missing: operations.acquireLock == nil},
+		{name: "verifyCandidate", missing: operations.verifyCandidate == nil},
+		{name: "createBackup", missing: operations.createBackup == nil},
+		{name: "openBackup", missing: operations.openBackup == nil},
+		{name: "replace", missing: operations.replace == nil},
+		{name: "verifyTarget", missing: operations.verifyTarget == nil},
+		{name: "readBackupSnapshot", missing: operations.readBackupSnapshot == nil},
+	}
+	for _, field := range fields {
+		if field.missing {
+			return fmt.Errorf("transaction operations: nil field %s", field.name)
+		}
+	}
+	return nil
+}
+
+// Execute выполняет одну changed transaction: internal validation, lock, повторный
+// base hash, findmnt candidate check, backup текущей операции, atomic replace,
+// post-check и при необходимости один automatic rollback. No-op завершается до lock.
+func Execute(ctx context.Context, plan Plan, options Options) (TransactionResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return executeWithOperations(ctx, plan, options, productionTransactionOperations())
+}
+
+// executeWithOperations реализует Execute с подменяемыми границами отказов. Lock
+// освобождается deferred ровно один раз; ошибка Close присоединяется к primary error
+// и не изменяет TransactionResult.
+func executeWithOperations(ctx context.Context, plan Plan, options Options, operations transactionOperations) (result TransactionResult, err error) {
+	if err := validateTransactionOperations(operations); err != nil {
+		return TransactionResult{}, err
+	}
+
+	prepared, err := prepareTransaction(plan, prepareOperations{readSnapshot: operations.readSnapshot})
+	result = TransactionResult{
+		Changed:         prepared.changed,
+		TargetPath:      prepared.base.Path,
+		CandidateSHA256: prepared.candidateSHA256,
+		InternalReport:  prepared.internalReport,
+		Recovery:        RecoveryPaths{Target: prepared.base.Path},
+	}
+	if err != nil {
+		return result, err
+	}
+	if !prepared.changed {
+		return result, nil
+	}
+
+	lock, err := operations.acquireLock(ctx, plan.TargetPath, options.LockTimeout)
+	if err != nil {
+		return result, transactionFailure(FailureConflict, ErrTransactionConflict,
+			fmt.Errorf("получить lock target %s: %w", plan.TargetPath, err), result.Recovery)
+	}
+	lockClosed := false
+	defer func() {
+		if lockClosed {
+			return
+		}
+		lockClosed = true
+		if closeErr := lock.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("освободить lock target %s: %w", plan.TargetPath, closeErr))
+		}
+	}()
+
+	// Повторное чтение обязано идти через тот же seam: иначе fault injection не
+	// сможет проверить внешнее изменение target между base read и lock.
+	current, err := operations.readSnapshot(plan.TargetPath)
+	if err != nil {
+		return result, transactionFailure(FailureConflict, ErrTransactionConflict,
+			fmt.Errorf("повторно прочитать target %s: %w", plan.TargetPath, err), result.Recovery)
+	}
+	if current.SHA256 != prepared.base.SHA256 {
+		return result, transactionFailure(FailureConflict, ErrTransactionConflict,
+			fmt.Errorf("%w: %s", writer.ErrBaseHashConflict, current.Path), result.Recovery)
+	}
+	result.TargetPath = current.Path
+	result.Recovery.Target = current.Path
+
+	preVerification := operations.verifyCandidate(ctx, options.Runner, plan.Candidate)
+	result.PreVerification = preVerification
+	if preVerification.Report.HasErrors() {
+		return result, transactionFailure(FailureExternal, ErrTransactionExternal,
+			errors.New("проверка candidate завершилась с severity=error"), result.Recovery)
+	}
+
+	createOptions := backup.CreateOptions{
+		Directory:          plan.BackupDirectory,
+		Prefix:             plan.BackupPrefix,
+		Operation:          plan.Operation,
+		SourceVerification: backup.SourceValid,
+	}
+	created, err := operations.createBackup(current, createOptions)
+	if err != nil {
+		return result, transactionFailure(FailureIO, ErrTransactionIO,
+			fmt.Errorf("создать backup target %s: %w", current.Path, err), result.Recovery)
+	}
+	result.Recovery.Backup = created.Path
+	result.Recovery.Metadata = created.MetadataPath
+
+	verified, err := operations.openBackup(created.Path)
+	if err != nil {
+		return result, transactionFailure(FailureIO, ErrTransactionIO,
+			fmt.Errorf("проверить backup %s: %w", created.Path, err), result.Recovery)
+	}
+	result.Backup = verified
+
+	replaceResult, err := operations.replace(current.Path, plan.Candidate)
+	if err != nil {
+		primary := transactionFailure(FailureIO, ErrTransactionIO,
+			fmt.Errorf("заменить target %s: %w", current.Path, err), result.Recovery)
+		if !replaceResult.Replaced {
+			return result, primary
+		}
+		return rollbackAfterFailure(result, primary, current.Path, verified, operations)
+	}
+
+	postVerification := operations.verifyTarget(ctx, options.Runner, current.Path)
+	result.PostVerification = postVerification
+	if postVerification.Report.HasErrors() {
+		primary := transactionFailure(FailureExternal, ErrTransactionExternal,
+			errors.New("post-check target завершился с severity=error"), result.Recovery)
+		return rollbackAfterFailure(result, primary, current.Path, verified, operations)
+	}
+
+	return result, nil
+}
+
+// rollbackAfterFailure выполняет ровно одну попытку восстановления backup текущей
+// transaction. Он никогда не ищет «последний» backup и не повторяет replace: при
+// повторном сбое сохраняются primary и rollback causes, а backup остаётся на диске.
+func rollbackAfterFailure(result TransactionResult, primary *TransactionError, targetPath string, verified backup.Backup, operations transactionOperations) (TransactionResult, error) {
+	backupSnapshot, err := operations.readBackupSnapshot(verified.Path)
+	if err != nil {
+		result.RollbackError = err
+		rollbackFailure := transactionFailure(FailureRollback, ErrTransactionRollback,
+			fmt.Errorf("прочитать backup %s: %w", verified.Path, err), result.Recovery)
+		rollbackFailure.Err = errors.Join(rollbackFailure.Err, fmt.Errorf("первичная ошибка: %w", primary.Err))
+		return result, rollbackFailure
+	}
+
+	_, err = operations.replace(targetPath, backupSnapshot.Data)
+	if err != nil {
+		result.RollbackError = err
+		rollbackFailure := transactionFailure(FailureRollback, ErrTransactionRollback,
+			fmt.Errorf("восстановить backup %s в target %s: %w", verified.Path, targetPath, err), result.Recovery)
+		rollbackFailure.Err = errors.Join(rollbackFailure.Err, fmt.Errorf("первичная ошибка: %w", primary.Err))
+		return result, rollbackFailure
+	}
+
+	result.RolledBack = true
+	result.RollbackError = nil
+	return result, primary
 }
