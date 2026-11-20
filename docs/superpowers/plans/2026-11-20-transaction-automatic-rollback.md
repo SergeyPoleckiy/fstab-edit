@@ -197,7 +197,7 @@ git commit -m "feat: add transaction validation preparation"
 - Create: `internal/transaction/transaction_execute_test.go`
 
 **Interfaces:**
-- Consumes: Task 1 prepared transaction; `writer.AcquireLock`, `VerifyBaseHash`, `Replace`; `backup.Create/Open`; `sysutil.VerifyCandidate`, `NewFindmntVerifier`.
+- Consumes: Task 1 prepared transaction; `writer.AcquireLock`, `writer.ReadSnapshot`, `writer.Replace`; `backup.Create/Open`; `sysutil.VerifyCandidate`, `NewFindmntVerifier`.
 - Produces: публичный `Execute`, `transactionOperations`, full pre/post rollback behavior без rotation (Task 3).
 
 - [ ] **Step 1: Написать failing execute tests без rotation**
