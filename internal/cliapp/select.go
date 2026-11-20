@@ -25,9 +25,9 @@ func SelectorFromValues(positional, line, mount, source string, required bool) (
 	}
 	switch {
 	case ways == 0 && required:
-		return editor.Selector{}, UsageError(nil, "требуется селектор: позиционный аргумент, --line, --mount или --source")
+		return editor.Selector{}, UsageError(nil, "требуется селектор: позиционный аргумент, --line, --mount-point или --device")
 	case ways > 1:
-		return editor.Selector{}, UsageError(nil, "селектор задан несколькими способами: используйте только один из позиционного аргумента, --line, --mount, --source")
+		return editor.Selector{}, UsageError(nil, "селектор задан несколькими способами: используйте только один из позиционного аргумента, --line, --mount-point, --device")
 	}
 	switch {
 	case positional != "":
