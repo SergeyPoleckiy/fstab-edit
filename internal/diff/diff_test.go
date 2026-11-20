@@ -33,8 +33,10 @@ func TestUnifiedDiffUnchanged(t *testing.T) {
 
 func TestUnifiedDiffDeleteHunk(t *testing.T) {
 	got := diff.Unified("a", "b", []byte("one\ntwo\nthree\n"), []byte("one\nthree\n"))
-	if !strings.Contains(got, "-two") || strings.Contains(got, "+") && !strings.Contains(got, "+++ b") {
-		t.Fatalf("delete hunk malformed: %q", got)
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++ ") {
+			t.Fatalf("delete hunk must not contain added lines: %q", got)
+		}
 	}
 	// Удалённая строка окружена тремя строками context с каждой стороны, где есть.
 	if !strings.Contains(got, " one\n-two\n three\n") {
@@ -80,5 +82,15 @@ func TestUnifiedDiffEmptyToContent(t *testing.T) {
 	}
 	if diff.Unified("a", "b", nil, nil) != "" {
 		t.Fatalf("two empty inputs must produce empty diff")
+	}
+}
+
+func TestUnifiedDiffFinalNewlineOnly(t *testing.T) {
+	got := diff.Unified("a", "b", []byte("x\n"), []byte("x"))
+	if !strings.Contains(got, "-x") || !strings.Contains(got, "+x") {
+		t.Fatalf("newline-only change must produce a hunk: %q", got)
+	}
+	if !strings.Contains(got, `\ No newline at end of file`) {
+		t.Fatalf("missing no-newline marker: %q", got)
 	}
 }

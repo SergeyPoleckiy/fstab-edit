@@ -55,7 +55,11 @@ type op struct {
 	candNo int // zero-based номер строки в candidate; для opDelete равен -1
 }
 
-// lcsOps вычисляет LCS по текстам строк и возвращает последовательность
+// sameLine сравнивает и текст, и признак финального newline: запись "x" без
+// завершающего перевода строки отличается от "x\n" и должна попасть в diff.
+func sameLine(a, b sourceLine) bool { return a.text == b.text && a.newline == b.newline }
+
+// lcsOps вычисляет LCS по строкам и возвращает последовательность
 // keep/delete/add операций, приводящую original к candidate.
 func lcsOps(original, candidate []sourceLine) []op {
 	rows, cols := len(original), len(candidate)
@@ -66,7 +70,7 @@ func lcsOps(original, candidate []sourceLine) []op {
 	}
 	for i := rows - 1; i >= 0; i-- {
 		for j := cols - 1; j >= 0; j-- {
-			if original[i].text == candidate[j].text {
+			if sameLine(original[i], candidate[j]) {
 				table[i][j] = table[i+1][j+1] + 1
 			} else if table[i+1][j] >= table[i][j+1] {
 				table[i][j] = table[i+1][j]
@@ -79,7 +83,7 @@ func lcsOps(original, candidate []sourceLine) []op {
 	i, j := 0, 0
 	for i < rows && j < cols {
 		switch {
-		case original[i].text == candidate[j].text:
+		case sameLine(original[i], candidate[j]):
 			ops = append(ops, op{kind: opKeep, line: original[i], origNo: i, candNo: j})
 			i++
 			j++
