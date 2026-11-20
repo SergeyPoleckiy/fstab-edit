@@ -201,7 +201,7 @@ func rotateIfNeeded(path string, max int64, keep int) error {
 	}
 	for i := keep - 1; i >= 1; i-- {
 		from := path + "." + fmt.Sprint(i)
-		to := path + "." + fmt.Sprint(i + 1)
+		to := path + "." + fmt.Sprint(i+1)
 		if _, err := os.Stat(from); err == nil {
 			if err := os.Rename(from, to); err != nil {
 				return fmt.Errorf("rotate %s → %s: %w", from, to, err)
