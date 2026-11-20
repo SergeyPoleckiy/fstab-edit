@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -429,5 +430,28 @@ func TestExecuteRotationFailureKeepsCallerProtectedCopy(t *testing.T) {
 	}
 	if len(gotProtected) != 2 || gotProtected[0] != "stable-id" || gotProtected[1] == "stable-id" {
 		t.Fatalf("protected copy: %v", gotProtected)
+	}
+}
+
+// TestExecuteRejectsNilRotateSeam фиксирует programming error по имени поля: общий
+// incomplete-config test останавливается на первом nil field и не доказывает,
+// что rotate входит в обязательный production seam contract.
+func TestExecuteRejectsNilRotateSeam(t *testing.T) {
+	operations := productionTransactionOperations()
+	operations.rotate = nil
+	_, err := executeWithOperations(context.Background(), Plan{
+		TargetPath: filepath.Join(t.TempDir(), "fstab"),
+		Candidate:  []byte(validCandidate),
+		Operation:  backup.OperationManual,
+	}, Options{}, operations)
+	if err == nil {
+		t.Fatal("ожидалась ошибка nil rotate seam")
+	}
+	if !strings.Contains(err.Error(), "rotate") {
+		t.Fatalf("ошибка должна указывать именно rotate seam: %v", err)
+	}
+	var transactionErr *TransactionError
+	if errors.As(err, &transactionErr) {
+		t.Fatalf("programming error seam не должен классифицироваться как TransactionError: %v", err)
 	}
 }

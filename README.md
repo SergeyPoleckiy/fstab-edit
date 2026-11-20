@@ -86,7 +86,7 @@ golangci-lint run
 Гарантии `internal/transaction.Execute`:
 
 1. No-op candidate, байтово равный target, завершается до lock, validation, backup, `findmnt` и write с `Changed=false`; внутренние ошибки candidate запрещают lock и изменения.
-2. Lock удерживается от повторного чтения target и base SHA-256 через backup, atomic replace, post-check и возможный rollback. Внешнее изменение target запрещает backup/write и завершается классом `conflict`.
+2. Lock удерживается от повторного чтения target и base SHA-256 через backup, atomic replace, post-check, возможный rollback и разрешённую после успеха rotation. Внешнее изменение target запрещает backup/write и завершается классом `conflict`.
 3. Backup создаётся только из snapshot, повторно прочитанного под lock, и заново проверяется через `backup.Open` до replace.
 4. Post-write warnings допустимы; errors вызывают ровно одну попытку restore backup именно текущей transaction. `Replaced=false` никогда не вызывает rollback.
 5. Успешный rollback возвращает primary error с `RolledBack=true`. Rollback failure возвращает класс `rollback`, сохраняет primary и rollback causes и recovery paths target/backup/metadata.
