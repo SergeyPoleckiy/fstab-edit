@@ -32,7 +32,7 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor < len(entries)-1 {
 			m.cursor++
 		}
-	case "m":
+	case "m", "M":
 		if m.session == nil {
 			break
 		}
@@ -45,10 +45,10 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// перечитывает список устройств.
 		m.blockdev = loadBlockDevices(context.Background(), &m)
 		m.screen = ScreenBlockDevices
-	case "h":
+	case "h", "H":
 		m.history = loadHistory(&m)
 		m.screen = ScreenHistory
-	case "l":
+	case "l", "L":
 		m.logEvents = loadLog(&m, screenPageSize)
 		m.screen = ScreenLog
 	case "f1", "?":

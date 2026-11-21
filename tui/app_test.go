@@ -161,7 +161,41 @@ func TestBlockDevicesFlow(t *testing.T) {
 	}
 }
 
-// TestCommentToggleBranches проверяет ветвление клавиши 'c' на уровне Update:
+// TestScreenKeysBothCases проверяет, что экраны монтирований (M), истории (H),
+// журнала (L) и устройств (B) открываются в обоих регистрах: Shift-вариант
+// отдаёт rune 'M'/'H'/'L', обычная клавиша — "m"/"h"/"l"; read-only экраны не
+// должны требовать layout-переключения. Esc возвращает на таблицу.
+func TestScreenKeysBothCases(t *testing.T) {
+	target := writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\nUUID=bbb /mnt/data ext4 rw 0 2\n")
+	cases := []struct {
+		lower, upper rune
+		screen       Screen
+	}{
+		{'m', 'M', ScreenMounts},
+		{'h', 'H', ScreenHistory},
+		{'l', 'L', ScreenLog},
+		{'b', 'B', ScreenBlockDevices},
+	}
+	press := func(m model, r rune) model {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		return updated.(model)
+	}
+	for _, tc := range cases {
+		for _, r := range []rune{tc.lower, tc.upper} {
+			m := testModel(t, testOptions(t, target))
+			m = press(m, r)
+			if m.ScreenNow() != tc.screen {
+				t.Fatalf("клавиша %q: экран %v, ожидался %v", r, m.ScreenNow(), tc.screen)
+			}
+			updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+			m = updated.(model)
+			if m.ScreenNow() != ScreenTable {
+				t.Fatalf("клавиша %q: Esc не вернул таблицу: %v", r, m.ScreenNow())
+			}
+		}
+	}
+}
+
 // активная запись комментируется (Kind → NodeCommentedEntry), закомментированная
 // включается (Kind → NodeEntry); обе мутации проходят через applyOp, поэтому
 // dirty выставлен, а ctrl+z откатывает изменения в исходном порядке.
