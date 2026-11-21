@@ -134,6 +134,14 @@ var catalogRU = map[string]string{
 	"tui.mounts_header": "#   DEVICE                   MOUNT            STATE",
 	"tui.diag_at_line":  "%s (строка %d)",
 
+	// --- Ключи TUI (этап 3, Task 2): экран блочных устройств (B) ---
+	"tui.blockdev_title":     "Блочные устройства",
+	"tui.blockdev_error":     "не удалось получить список блочных устройств: %s",
+	"tui.blockdev_empty":     "блочные устройства не обнаружены",
+	"tui.blockdev_header":    "PATH                 TYPE   FSTYPE   SIZE     MOUNTPOINT       LABEL        UUID",
+	"tui.help_key_blockdev":  "B",
+	"tui.help_desc_blockdev": "блочные устройства (lsblk)",
+
 	"tui.log_title":  "Журнал операций",
 	"tui.log_error":  "не удалось прочитать журнал: %s",
 	"tui.log_empty":  "Журнал пуст или недоступен",
@@ -153,7 +161,7 @@ var catalogRU = map[string]string{
 	"tui.col_dump":                "D",
 	"tui.col_pass":                "P",
 	"tui.col_state":               "✓",
-	"tui.keys_table":              "[Enter] Изменить [Ins] Добавить [Del] Удалить [c] Комментарий [d] Diff [M] Монтирования [H] История [L] Журнал [F1] Помощь [Ctrl+S] Сохранить [Ctrl+Q] Выход",
+	"tui.keys_table":              "[Enter] Изменить [Ins] Добавить [Del] Удалить [c] Комментарий [d] Diff [M] Монтирования [B] Устройства [H] История [L] Журнал [F1] Помощь [Ctrl+S] Сохранить [Ctrl+Q] Выход",
 	"tui.keys_help_hint":          "F1 — помощь",
 	"tui.keys_form":               "Enter — применить, Esc — отмена, Tab — поле, d — diff",
 	"tui.keys_history":            "[d] Diff [r] Восстановить [Esc] Назад",

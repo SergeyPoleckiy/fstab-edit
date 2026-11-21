@@ -28,6 +28,8 @@ const (
 	ScreenConflict
 	// ScreenMounts — статус монтирований (клавиша M, Task 5).
 	ScreenMounts
+	// ScreenBlockDevices — блочные устройства (клавиша B, ТЗ §5.4, этап 3).
+	ScreenBlockDevices
 	// ScreenHistory — история backup (клавиша H, Task 6).
 	ScreenHistory
 	// ScreenLog — просмотр журнала (клавиша L, Task 5).
@@ -90,6 +92,9 @@ type model struct {
 	mounts    mountsModel
 	logEvents logModel
 	diff      diffModel
+	// blockdev — данные экрана блочных устройств (клавиша B, этап 3):
+	// заполняются синхронно в момент входа на экран.
+	blockdev blockdevModel
 	// history — данные экрана истории backup (клавиша H, Task 6):
 	// заполняются синхронно в момент входа на экран.
 	history historyModel
@@ -175,6 +180,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateConfirmQuit(msg.String())
 		case ScreenMounts, ScreenLog, ScreenDiff:
 			return m.updateScrollable(msg)
+		case ScreenBlockDevices:
+			return m.updateBlockDevices(msg)
 		case ScreenHistory:
 			return m.updateHistory(msg)
 		default:
@@ -205,6 +212,8 @@ func (m model) View() string {
 		return m.viewDiff()
 	case ScreenMounts:
 		return m.viewMounts()
+	case ScreenBlockDevices:
+		return m.viewBlockDevices()
 	case ScreenHistory:
 		return m.viewHistory()
 	case ScreenLog:

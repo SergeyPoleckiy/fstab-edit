@@ -38,6 +38,13 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.mounts = loadMounts(context.Background(), &m)
 		m.screen = ScreenMounts
+	case "b", "B":
+		// Блочные устройства (ТЗ §5.4): обрабатываются оба регистра — Shift+B
+		// отдаёт rune 'B', обычная 'b' — "b"; read-only экран не должен требовать
+		// layout-переключения. Загрузка — синхронно при входе: повторный вход
+		// перечитывает список устройств.
+		m.blockdev = loadBlockDevices(context.Background(), &m)
+		m.screen = ScreenBlockDevices
 	case "h":
 		m.history = loadHistory(&m)
 		m.screen = ScreenHistory

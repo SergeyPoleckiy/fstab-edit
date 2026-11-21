@@ -26,6 +26,9 @@ type Deps struct {
 	Replace func(string, []byte) (writer.ReplaceResult, error)
 	// VerifyTarget проверяет фактический target после restore.
 	VerifyTarget func(context.Context, sysutil.CommandRunner, string) sysutil.Verification
+	// ListBlockDevices возвращает дерево блочных устройств (lsblk) для экрана B
+	// и подсказок формы; тесты подменяют данными без запуска реального lsblk.
+	ListBlockDevices func(context.Context, sysutil.CommandRunner) ([]sysutil.BlockDevice, error)
 	// OpenLog открывает журнал перед сохранением; ошибка блокирует сохранение.
 	OpenLog func() (*logger.Logger, error)
 }
@@ -41,6 +44,7 @@ func ProductionDeps(logOpts logger.Options) Deps {
 		VerifyTarget: func(ctx context.Context, runner sysutil.CommandRunner, path string) sysutil.Verification {
 			return sysutil.NewFindmntVerifier(runner).Verify(ctx, path)
 		},
-		OpenLog: func() (*logger.Logger, error) { return logger.Open(logOpts) },
+		ListBlockDevices: sysutil.ListBlockDevices,
+		OpenLog:          func() (*logger.Logger, error) { return logger.Open(logOpts) },
 	}
 }

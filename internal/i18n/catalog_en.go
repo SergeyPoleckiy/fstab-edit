@@ -133,6 +133,14 @@ var catalogEN = map[string]string{
 	"tui.mounts_header": "#   DEVICE                   MOUNT            STATE",
 	"tui.diag_at_line":  "%s (line %d)",
 
+	// --- TUI keys (stage 3, Task 2): block devices screen (B) ---
+	"tui.blockdev_title":     "Block devices",
+	"tui.blockdev_error":     "failed to list block devices: %s",
+	"tui.blockdev_empty":     "no block devices found",
+	"tui.blockdev_header":    "PATH                 TYPE   FSTYPE   SIZE     MOUNTPOINT       LABEL        UUID",
+	"tui.help_key_blockdev":  "B",
+	"tui.help_desc_blockdev": "block devices (lsblk)",
+
 	"tui.log_title":  "Operation log",
 	"tui.log_error":  "cannot read the log file: %s",
 	"tui.log_empty":  "Log is empty or unavailable",
@@ -152,7 +160,7 @@ var catalogEN = map[string]string{
 	"tui.col_dump":                "D",
 	"tui.col_pass":                "P",
 	"tui.col_state":               "✓",
-	"tui.keys_table":              "[Enter] Edit [Ins] Add [Del] Delete [c] Comment [d] Diff [M] Mounts [H] History [L] Log [F1] Help [Ctrl+S] Save [Ctrl+Q] Quit",
+	"tui.keys_table":              "[Enter] Edit [Ins] Add [Del] Delete [c] Comment [d] Diff [M] Mounts [B] Devices [H] History [L] Log [F1] Help [Ctrl+S] Save [Ctrl+Q] Quit",
 	"tui.keys_help_hint":          "F1 — help",
 	"tui.keys_form":               "Enter — apply, Esc — cancel, Tab — field, d — diff",
 	"tui.keys_history":            "[d] Diff [r] Restore [Esc] Back",

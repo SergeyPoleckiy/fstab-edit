@@ -111,6 +111,51 @@ func TestDeleteAndUndoFlow(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
 }
 
+// TestBlockDevicesFlow проверяет сквозной сценарий экрана устройств: клавиша B
+// из таблицы открывает экран с данными подменённого seam (реальный lsblk в
+// тестах не выполняется), Esc возвращает на таблицу, target на диске не тронут.
+func TestBlockDevicesFlow(t *testing.T) {
+	target := writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\nUUID=bbb /mnt/data ext4 rw 0 2\n")
+	opts := testOptions(t, target)
+	opts.Deps.ListBlockDevices = func(context.Context, sysutil.CommandRunner) ([]sysutil.BlockDevice, error) {
+		return []sysutil.BlockDevice{
+			{Name: "sdb1", Path: "/dev/sdb1", Type: "part", FSType: "vfat",
+				Size: "16G", Label: "USBKEY", UUID: "BBBB-2222", MountPoint: "/mnt/usb"},
+		}, nil
+	}
+	m := NewModel(opts)
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(120, 30))
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return strings.Contains(string(b), "/mnt/data")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// B — экран блочных устройств: показывает устройство из fake seam.
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'B'}})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		s := string(b)
+		return strings.Contains(s, "Блочные устройства") && strings.Contains(s, "/dev/sdb1") &&
+			strings.Contains(s, "USBKEY")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// Esc — назад в таблицу записей.
+	tm.Send(tea.KeyMsg{Type: tea.KeyEsc})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		s := string(b)
+		return strings.Contains(s, "/mnt/data") && !strings.Contains(s, "Блочные устройства")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// Чистая сессия: выход без подтверждения; target не изменён.
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("прочитать target: %v", err)
+	}
+	if !strings.Contains(string(data), "UUID=bbb") {
+		t.Fatalf("target на диске изменился read-only экраном: %q", data)
+	}
+}
+
 // TestCommentToggleBranches проверяет ветвление клавиши 'c' на уровне Update:
 // активная запись комментируется (Kind → NodeCommentedEntry), закомментированная
 // включается (Kind → NodeEntry); обе мутации проходят через applyOp, поэтому
