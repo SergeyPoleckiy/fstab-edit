@@ -79,6 +79,9 @@ type model struct {
 	// (loadErr-экран мутации недоступны, но доступ к полю защищён nil-check).
 	session  *sessionState
 	lastSave saveOutcome // итог последней попытки сохранения (ScreenSaveResult)
+	// form — состояние формы добавления/редактирования записи; актуально,
+	// пока screen == ScreenForm (Task 4).
+	form formModel
 }
 
 // deps возвращает границы отказа модели: явно заданные через options.Deps
@@ -152,6 +155,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.screen {
 		case ScreenTable:
 			return m.updateTable(msg)
+		case ScreenForm:
+			return m.updateForm(msg)
 		case ScreenConfirmReload:
 			return m.updateConfirmReload(msg.String())
 		default:
@@ -174,6 +179,8 @@ func (m model) View() string {
 	switch m.screen {
 	case ScreenTable:
 		return m.viewTable()
+	case ScreenForm:
+		return m.viewForm()
 	case ScreenSaveResult:
 		return m.viewSaveResult()
 	case ScreenConfirmReload:

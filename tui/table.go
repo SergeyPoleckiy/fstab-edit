@@ -34,6 +34,16 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = ScreenLog
 	case "f1", "?":
 		m.screen = ScreenHelp
+	case "enter":
+		// Редактирование записи под курсором: newEditForm получает индекс
+		// узла в document.Nodes, а не номер строки таблицы.
+		if idxs := m.entryIndexes(); m.cursor < len(idxs) {
+			m.form = newEditForm(m.document, idxs[m.cursor])
+			m.screen = ScreenForm
+		}
+	case "insert", "i":
+		m.form = newAddForm()
+		m.screen = ScreenForm
 	case "d", "delete":
 		// Удаление записи под курсором: селектор — физическая строка записи.
 		// session nil только на loadErr-экране, который сюда не доходит,
@@ -85,8 +95,8 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = Tr(m.opts.Lang, "reload_done")
 		}
 	}
-	// Enter (редактирование/добавление форм), Ins (добавление), F2-совмещённый
-	// с ctrl+s подключены; остальные экраны — Task 4–6.
+	// Enter (редактирование формы), Ins/i (добавление формы) подключены;
+	// остальные экраны — Task 5–6.
 	return m, nil
 }
 
