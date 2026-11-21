@@ -19,6 +19,12 @@ import (
 	"fstab-edit/internal/sysutil"
 )
 
+// version — версия сборки. По умолчанию "dev" для разработческих сборок;
+// release-сборки переопределяют значение через -ldflags:
+//
+//	go build -ldflags "-X main.version=1.0.0" -o fstab-edit .
+var version = "dev"
+
 // main собирает production App и завершает процесс с кодом, который вернула
 // команда. os.Exit вызывается только здесь, чтобы тесты cmd не затрагивали
 // процесс test-runner.
@@ -35,7 +41,7 @@ func main() {
 		Stdout:  os.Stdout,
 		Stderr:  os.Stderr,
 		Stdin:   stdin,
-		Version: "dev",
+		Version: version,
 		Runner:  sysutil.NewRunner(),
 		TTY:     stdinIsTTY,
 		Chooser: interactiveChooser{stdin: stdin, stderr: os.Stderr, lang: lang},

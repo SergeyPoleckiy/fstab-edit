@@ -31,7 +31,7 @@
 ```bash
 git clone https://github.com/SergeyPoleckiy/fstab-edit.git
 cd fstab-edit
-go build -o fstab-edit .
+go build -ldflags "-X main.version=1.0.0" -o fstab-edit .
 ```
 
 Установка — копирование статического бинаря в каталог из `PATH`:
