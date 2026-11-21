@@ -40,15 +40,20 @@ func writeTestFstab(t *testing.T, content string) string {
 	return path
 }
 
-// testDeps собирает production-границы отказа с двумя подменами: реальный
-// ReadSnapshot (нужен для загрузки документа) и ExecuteTransaction-заглушка,
-// возвращающая ошибку, потому что скелет Task 1 ничего не сохраняет.
+// testDeps собирает production-границы отказа с подменами: реальный
+// ReadSnapshot (нужен для загрузки документа), ExecuteTransaction-заглушка,
+// потому что тесты ничего не сохраняют, и ListBlockDevices-заглушка с пустым
+// списком: форма открывается без панели подсказок, и реальный lsblk в тестах
+// не выполняется. Сценарии, проверяющие устройства, подменяют seam ещё раз.
 func testDeps(t *testing.T) *Deps {
 	t.Helper()
 	deps := ProductionDeps(logger.Options{})
 	deps.ReadSnapshot = writer.ReadSnapshot
 	deps.ExecuteTransaction = func(context.Context, transaction.Plan, transaction.Options) (transaction.TransactionResult, error) {
-		return transaction.TransactionResult{}, errors.New("сохранение недоступно в скелете Task 1")
+		return transaction.TransactionResult{}, errors.New("сохранение недоступно в тестах")
+	}
+	deps.ListBlockDevices = func(context.Context, sysutil.CommandRunner) ([]sysutil.BlockDevice, error) {
+		return nil, nil
 	}
 	return &deps
 }
@@ -242,4 +247,56 @@ func TestCommentToggleFlow(t *testing.T) {
 	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+}
+
+// TestFormCompletionFlow проверяет сквозной сценарий автодополнения в TTY:
+// Ins открывает форму с устройствами, подменёнными через seam (реальный lsblk
+// не выполняется), Ctrl+N подставляет UUID= первого устройства в поле device,
+// Esc отменяет форму без подтверждения, чистая сессия выходит по 'q', target
+// на диске не тронут.
+func TestFormCompletionFlow(t *testing.T) {
+	target := writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\nUUID=bbb /mnt/data ext4 rw 0 2\n")
+	opts := testOptions(t, target)
+	opts.Deps.ListBlockDevices = func(context.Context, sysutil.CommandRunner) ([]sysutil.BlockDevice, error) {
+		return []sysutil.BlockDevice{
+			{Name: "sdb1", Path: "/dev/sdb1", Type: "part", FSType: "ext4",
+				Size: "256G", Label: "DATA", UUID: "CCCC-3333"},
+		}, nil
+	}
+	m := NewModel(opts)
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(100, 30))
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return strings.Contains(string(b), "/mnt/data")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// Ins — форма добавления: устройства загружены при открытии, панель
+	// подсказок видна вместе с клавишами листания.
+	tm.Send(tea.KeyMsg{Type: tea.KeyInsert})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		s := string(b)
+		return strings.Contains(s, "Новая запись") && strings.Contains(s, "Ctrl+N/Ctrl+P")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// Ctrl+N — первая подсказка устройства подставлена в поле device.
+	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlN})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return strings.Contains(string(b), "UUID=CCCC-3333")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// Esc — отмена формы без подтверждения: возврат на таблицу, сессия чистая.
+	tm.Send(tea.KeyMsg{Type: tea.KeyEsc})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		s := string(b)
+		return strings.Contains(s, "/mnt/data") && !strings.Contains(s, "Новая запись")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("прочитать target: %v", err)
+	}
+	if !strings.Contains(string(data), "UUID=bbb") {
+		t.Fatalf("target на диске изменился формой: %q", data)
+	}
 }

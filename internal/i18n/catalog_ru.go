@@ -197,6 +197,7 @@ var catalogRU = map[string]string{
 	"tui.form_label_comment":      "Комментарий (необязательно)",
 	"tui.form_applied":            "запись применена",
 	"tui.form_no_changes":         "изменений нет",
+	"tui.hints_keys":              "Ctrl+N/Ctrl+P — листать подсказки",
 	"tui.history_title":           "История резервных копий",
 	"tui.history_empty":           "резервные копии не найдены",
 	"tui.history_error":           "не удалось прочитать историю: %s",

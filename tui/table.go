@@ -55,13 +55,19 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = ScreenHelp
 	case "enter":
 		// Редактирование записи под курсором: newEditForm получает индекс
-		// узла в document.Nodes, а не номер строки таблицы.
+		// узла в document.Nodes, а не номер строки таблицы. Устройства для
+		// подсказок грузятся при открытии формы; их отсутствие (ошибка/пусто)
+		// форму не ломает — панель просто не показывается.
 		if idxs := m.entryIndexes(); m.cursor < len(idxs) {
 			m.form = newEditForm(m.document, idxs[m.cursor])
+			m.form.devices, m.form.devicesErr = loadFormDevices(context.Background(), &m)
+			m.form.refreshHints()
 			m.screen = ScreenForm
 		}
 	case "insert", "i":
 		m.form = newAddForm()
+		m.form.devices, m.form.devicesErr = loadFormDevices(context.Background(), &m)
+		m.form.refreshHints()
 		m.screen = ScreenForm
 	case "d":
 		// Diff несохранённых изменений сессии (Task 5). Удаление записи —

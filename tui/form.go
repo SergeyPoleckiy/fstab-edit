@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -9,6 +11,7 @@ import (
 	"fstab-edit/internal/diff"
 	"fstab-edit/internal/editor"
 	"fstab-edit/internal/parser"
+	"fstab-edit/internal/sysutil"
 	"fstab-edit/internal/validator"
 	"fstab-edit/pkg/models"
 )
@@ -34,6 +37,17 @@ type formModel struct {
 	focus   int    // 0..6; 0-5 поля, 6 комментарий
 	preview string // кэш предпросмотра raw-строки
 	errText string // текстовая ошибка поля (не только цвет!)
+	// hints — варианты подстановки для активного поля (автодополнение, ТЗ §5.3):
+	// заполняются только для полей device (0), типа ФС (2) и опций (3);
+	// hintIdx — выбранный индекс (-1 — ничего не выбрано, панель без курсора).
+	hints   []deviceHint
+	hintIdx int
+	// devices — плоский список блочных устройств, загруженный при открытии
+	// формы через seam Deps.ListBlockDevices; питает подсказки поля device.
+	// devicesErr — ошибка той загрузки: форма работает как раньше, панель
+	// подсказок устройства просто не показывается (TUI не ломается без lsblk).
+	devices    []sysutil.BlockDevice
+	devicesErr error
 	// orig и origComment — значения на входе в форму (formEdit); сравнение
 	// с ними определяет Changes для editor.Edit и no-op при выходе.
 	orig        []string
@@ -41,9 +55,28 @@ type formModel struct {
 	showDiff    bool // true — панель показывает diff original→candidate
 }
 
+// maxFormHints ограничивает высоту панели подсказок: больше десяти строк панель
+// не показывает независимо от числа вариантов (полный список доступен листанием).
+const maxFormHints = 10
+
+// loadFormDevices загружает плоский список блочных устройств для подсказок поля
+// device через seam Deps.ListBlockDevices; runner берётся из Options — тот же,
+// что используют lsblk-проверки. Загрузка синхронная, как у экрана B: форма
+// открывается уже с данными. Ошибка не блокирует форму: вызывающий код хранит
+// её в devicesErr, и панель подсказок устройства просто не показывается.
+func loadFormDevices(ctx context.Context, m *model) ([]sysutil.BlockDevice, error) {
+	tree, err := m.deps().ListBlockDevices(ctx, m.opts.Runner)
+	if err != nil {
+		return nil, err
+	}
+	return sysutil.Flatten(tree), nil
+}
+
 // newAddForm собирает пустую форму добавления с фокусом на первом поле.
+// hintIdx начинается с -1: до первого Ctrl+N ничего не выбрано, панель
+// показывает список без курсорной строки.
 func newAddForm() formModel {
-	f := formModel{mode: formAdd, inputs: make([]textinput.Model, 6)}
+	f := formModel{mode: formAdd, inputs: make([]textinput.Model, 6), hintIdx: -1}
 	for i := range f.inputs {
 		f.inputs[i] = newFormInput()
 	}
@@ -247,7 +280,8 @@ func (f *formModel) diffText(doc *models.Document) string {
 
 // moveFocus сдвигает фокус по кругу по семи полям (6 полей + комментарий).
 // textinput принимает ввод только в состоянии Focus, поэтому blur прежнего
-// поля и focus нового обязательны.
+// поля и focus нового обязательны. После перехода подсказки пересчитываются
+// под новое активное поле: набор вариантов зависит только от него.
 func (f *formModel) moveFocus(delta int) {
 	total := len(f.inputs) + 1
 	f.focus = ((f.focus+delta)%total + total) % total
@@ -260,6 +294,64 @@ func (f *formModel) moveFocus(delta int) {
 	} else {
 		f.comment.Focus()
 	}
+	f.refreshHints()
+}
+
+// refreshHints пересчитывает варианты подстановки для активного поля и сбрасывает
+// выбранный индекс: список изменился, прежний курсор указывал бы неизвестно куда.
+// Поле device показывает все устройства (значение вводится целиком, префиксная
+// фильтрация для него неприменима); поля без подсказок (mount, dump, pass,
+// комментарий) обнуляют панель. Вызов безопасен при devicesErr: список устройств
+// при ошибке пуст, ветка device просто не наполняется.
+func (f *formModel) refreshHints() {
+	f.hints = nil
+	f.hintIdx = -1
+	switch f.focus {
+	case 0:
+		if len(f.devices) > 0 {
+			f.hints = deviceHints(f.devices)
+		}
+	case 2:
+		// Тип ФС фильтруется введённым префиксом по единому перечню валидатора.
+		for _, candidate := range filterHints(f.inputs[2].Value(), validator.KnownFSTypes) {
+			f.hints = append(f.hints, deviceHint{Value: candidate})
+		}
+	case 3:
+		// Опции зависят от типа ФС: контекст берётся из поля fs_type (2),
+		// даже если оно пока пустое — тогда предлагается базовый набор.
+		for _, candidate := range optionHints(f.inputs[2].Value(), f.inputs[3].Value()) {
+			f.hints = append(f.hints, deviceHint{Value: candidate})
+		}
+	}
+}
+
+// applyHint подставляет выбранную подсказку в активное поле. Для device и
+// fs_type значение заменяется целиком; для options заменяется только последний
+// токен (подсказка — полный токен, а не префикс+хвост). Список подсказок при
+// этом НЕ пересчитывается: Ctrl+N/Ctrl+P листают один и тот же набор, а иначе
+// после подстановки префиксный фильтр схлопнул бы список до одного варианта.
+// Пересчёт происходит при следующем вводе с клавиатуры или смене фокуса.
+func (f *formModel) applyHint() {
+	if f.hintIdx < 0 || f.hintIdx >= len(f.hints) {
+		return
+	}
+	value := f.hints[f.hintIdx].Value
+	switch f.focus {
+	case 0, 2:
+		f.inputs[f.focus].SetValue(value)
+	case 3:
+		current := f.inputs[3].Value()
+		if idx := strings.LastIndex(current, ","); idx >= 0 {
+			// Сохраняем запятую-разделитель: "defaults,noa" + "noatime" даёт
+			// "defaults,noatime", а не "defaultsnoatime".
+			value = current[:idx+1] + value
+		}
+		f.inputs[3].SetValue(value)
+	default:
+		return
+	}
+	f.errText = ""
+	f.refreshPreview()
 }
 
 // formAssociatedComment — локальная копия conservative-правила cliapp (helper
@@ -287,7 +379,8 @@ func formCommentText(raw string) string {
 
 // updateForm обрабатывает клавиши формы: Esc — отмена, Enter — подтверждение
 // (валидация → apply → таблица), d — переключение diff-панели, Tab/Shift+Tab
-// и стрелки вверх/вниз — фокус по кругу, остальное — в сфокусированное поле.
+// и стрелки вверх/вниз — фокус по кругу, Ctrl+N/Ctrl+P — листание подсказок
+// активного поля с подстановкой выбранного варианта, остальное — в поле.
 func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
@@ -297,6 +390,23 @@ func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "d":
 		m.form.showDiff = !m.form.showDiff
+		return m, nil
+	case "ctrl+n":
+		// Следующая подсказка. При пустой панели — no-op: клавиша не должна
+		// доходить до textinput и вставлять управляющий символ в значение.
+		if len(m.form.hints) == 0 {
+			return m, nil
+		}
+		m.form.hintIdx = (m.form.hintIdx + 1) % len(m.form.hints)
+		m.form.applyHint()
+		return m, nil
+	case "ctrl+p":
+		// Предыдущая подсказка: цикл по кругу, -1 уходит на последний вариант.
+		if len(m.form.hints) == 0 {
+			return m, nil
+		}
+		m.form.hintIdx = (m.form.hintIdx - 1 + len(m.form.hints)) % len(m.form.hints)
+		m.form.applyHint()
 		return m, nil
 	case "enter":
 		if text := m.form.validate(m.document); text != "" {
@@ -321,7 +431,8 @@ func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.form.moveFocus(-1)
 	}
 	// Остальные клавиши уходят в сфокусированное поле; после правки ошибка
-	// устарела и сбрасывается, предпросмотр пересчитывается.
+	// устарела и сбрасывается, предпросмотр пересчитывается, подсказки
+	// пересчитываются под новое значение поля (префиксный фильтр).
 	var cmd tea.Cmd
 	if m.form.focus < len(m.form.inputs) {
 		m.form.inputs[m.form.focus], cmd = m.form.inputs[m.form.focus].Update(msg)
@@ -330,13 +441,15 @@ func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	m.form.errText = ""
 	m.form.refreshPreview()
+	m.form.refreshHints()
 	return m, cmd
 }
 
 // viewForm рендерит форму записи: заголовок режима, метки полей с маркером
-// фокуса, строка ошибки с маркером "!", предпросмотр (raw-строка или diff)
-// и подсказка клавиш. Маркер фокуса текстовый (">") — тема monochrome не
-// обязана давать цвет (ТЗ §9.6).
+// фокуса, панель подсказок автодополнения (при непустом списке вариантов),
+// строка ошибки с маркером "!", предпросмотр (raw-строка или diff) и подсказка
+// клавиш. Маркер фокуса текстовый (">") — тема monochrome не обязана давать
+// цвет (ТЗ §9.6).
 func (m model) viewForm() string {
 	var b strings.Builder
 	title := Tr(m.opts.Lang, "form_title_add")
@@ -360,6 +473,7 @@ func (m model) viewForm() string {
 	if m.form.errText != "" {
 		b.WriteString(m.theme.MarkError(m.form.errText) + "\n")
 	}
+	b.WriteString(m.formHintsView())
 	b.WriteString("\n")
 	if m.form.showDiff {
 		b.WriteString(m.form.diffText(m.document))
@@ -367,6 +481,31 @@ func (m model) viewForm() string {
 		b.WriteString(m.theme.Muted.Render(m.form.preview) + "\n")
 	}
 	b.WriteString("\n" + m.theme.Muted.Render(Tr(m.opts.Lang, "keys_form")) + "\n")
+	return b.String()
+}
+
+// formHintsView рендерит панель автодополнения: строка-заголовок с клавишами
+// листания (приглушённая) и до maxFormHints строк "<value>  <info>"; выбранный
+// hintIdx подсвечен через theme.Selected. Панель показывается только при
+// непустом списке вариантов: для полей без подсказок и пустого списка
+// устройств viewForm остаётся как до автодополнения.
+func (m model) formHintsView() string {
+	if len(m.form.hints) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n" + m.theme.Muted.Render(Tr(m.opts.Lang, "hints_keys")) + "\n")
+	shown := min(len(m.form.hints), maxFormHints)
+	for i := 0; i < shown; i++ {
+		hint := m.form.hints[i]
+		// Значение усечено до 32 символов, чтобы правая колонка Info не уплывала
+		// на узких терминалах; Info уже ограничена maxDeviceHintInfoLen.
+		line := fmt.Sprintf("%-32.32s %s", hint.Value, hint.Info)
+		if i == m.form.hintIdx {
+			line = m.theme.Selected.Render(line)
+		}
+		b.WriteString(line + "\n")
+	}
 	return b.String()
 }
 

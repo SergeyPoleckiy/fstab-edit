@@ -196,6 +196,7 @@ var catalogEN = map[string]string{
 	"tui.form_label_comment":      "Comment (optional)",
 	"tui.form_applied":            "entry applied",
 	"tui.form_no_changes":         "no changes",
+	"tui.hints_keys":              "Ctrl+N/Ctrl+P — cycle hints",
 	"tui.history_title":           "Backup history",
 	"tui.history_empty":           "no backups found",
 	"tui.history_error":           "failed to read history: %s",
