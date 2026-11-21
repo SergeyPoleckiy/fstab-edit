@@ -1,0 +1,106 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"fstab-edit/pkg/models"
+)
+
+// updateTable обрабатывает клавиши главной таблицы (скелет Task 1):
+// навигация, выход, переключение экранов-заглушек.
+func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	entries := m.entryIndexes()
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down", "j":
+		if m.cursor < len(entries)-1 {
+			m.cursor++
+		}
+	case "m":
+		m.screen = ScreenMounts
+	case "h":
+		m.screen = ScreenHistory
+	case "l":
+		m.screen = ScreenLog
+	case "f1", "?":
+		m.screen = ScreenHelp
+	}
+	// Enter (редактирование/добавление форм), Del (удаление), Ctrl+Z (отмена),
+	// Ins, F2, Ctrl+S (сохранение), F5 (перезагрузка) подключаются Task 2–4.
+	return m, nil
+}
+
+// entryIndexes возвращает индексы узлов-записей документа в порядке следования.
+// Закомментированные записи входят в список: курсор перемещается по всем
+// записям, а признак активности показывается в колонке состояния.
+func (m model) entryIndexes() []int {
+	idx := make([]int, 0)
+	if m.document == nil {
+		return idx
+	}
+	for i, node := range m.document.Nodes {
+		if node.Kind == models.NodeEntry || node.Kind == models.NodeCommentedEntry {
+			idx = append(idx, i)
+		}
+	}
+	return idx
+}
+
+// nodePositionLine возвращает 1-based номер физической строки документа для
+// узла по его индексу: парсер не сохраняет порядковый номер узла отдельно,
+// поэтому позиция совпадает с индексом + 1.
+func nodePositionLine(_ *models.Document, idx int) int { return idx + 1 }
+
+// viewTable рендерит таблицу записей по образцу ТЗ §9.1: колонки
+// # │ Device │ Mount │ Type │ Options │ D │ P │ активность. Закомментированные
+// записи помечаются текстовым маркером "-" в колонке активности.
+func (m model) viewTable() string {
+	var b strings.Builder
+	b.WriteString(m.theme.Title.Render(Tr(m.opts.Lang, "app_title")) + "\n\n")
+	header := fmt.Sprintf("%-3s %-24s %-12s %-8s %-20s %s %s %s",
+		Tr(m.opts.Lang, "col_num"), Tr(m.opts.Lang, "col_device"), Tr(m.opts.Lang, "col_mount"),
+		Tr(m.opts.Lang, "col_type"), Tr(m.opts.Lang, "col_options"),
+		Tr(m.opts.Lang, "col_dump"), Tr(m.opts.Lang, "col_pass"), Tr(m.opts.Lang, "col_state"))
+	b.WriteString(m.theme.Header.Render(header) + "\n")
+	for row, idx := range m.entryIndexes() {
+		node := m.document.Nodes[idx]
+		line := nodePositionLine(m.document, idx)
+		state := "+"
+		if node.Kind == models.NodeCommentedEntry {
+			state = "-"
+		}
+		entry := node.Entry
+		var device, mount, fsType, options, dump, pass string
+		if entry != nil {
+			device = entry.Source.Value
+			mount = entry.MountPoint.Value
+			fsType = entry.FSType.Value
+			options = entry.Options.Value
+			if entry.Dump != nil {
+				dump = entry.Dump.Value
+			}
+			if entry.Pass != nil {
+				pass = entry.Pass.Value
+			}
+		}
+		rowText := fmt.Sprintf("%-3d %-24.24s %-12.12s %-8.8s %-20.20s %s %s %s",
+			line, device, mount, fsType, options, dump, pass, state)
+		if row == m.cursor {
+			rowText = m.theme.Selected.Render(rowText)
+		}
+		b.WriteString(rowText + "\n")
+	}
+	b.WriteString("\n" + m.theme.Muted.Render(Tr(m.opts.Lang, "keys_table")) + "\n")
+	if m.status != "" {
+		b.WriteString(m.theme.Info.Render(m.status) + "\n")
+	}
+	return b.String()
+}
