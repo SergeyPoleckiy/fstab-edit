@@ -5,6 +5,7 @@ package validator_test
 import (
 	"bytes"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -599,8 +600,16 @@ func TestKnownAndDeprecatedFSTypes(t *testing.T) {
 		{name: "xfs", fsType: "xfs"},
 		// btrfs известен validator без внешних утилит.
 		{name: "btrfs", fsType: "btrfs"},
+		// f2fs теперь входит в единый список KnownFSTypes (ТЗ §6.2).
+		{name: "f2fs", fsType: "f2fs"},
+		// reiserfs раньше получал fs.unknown, теперь известен (ТЗ §6.2).
+		{name: "reiserfs", fsType: "reiserfs"},
+		// ntfs-3g — драйвер FUSE, известен по ТЗ §6.2.
+		{name: "ntfs-3g", fsType: "ntfs-3g"},
 		// vfat известен и не требует сетевого source.
 		{name: "vfat", fsType: "vfat"},
+		// msdos — короткий FAT-тип из ТЗ §6.2, теперь известен.
+		{name: "msdos", fsType: "msdos"},
 		// exfat входит в перечень известных FS.
 		{name: "exfat", fsType: "exfat"},
 		// ntfs не должен порождать info fs.unknown.
@@ -625,6 +634,10 @@ func TestKnownAndDeprecatedFSTypes(t *testing.T) {
 		{name: "cgroup2", fsType: "cgroup2"},
 		// overlay известен без внешнего lookup.
 		{name: "overlay", fsType: "overlay"},
+		// bind — специальный тип из ТЗ §6.2, принимает generic source.
+		{name: "bind", fsType: "bind"},
+		// auto — специальный тип из ТЗ §6.2, принимает generic source.
+		{name: "auto", fsType: "auto"},
 		// squashfs использует generic absolute source.
 		{name: "squashfs", fsType: "squashfs"},
 		// iso9660 входит во встроенный список optical FS.
@@ -679,6 +692,57 @@ func TestUnknownFSType(t *testing.T) {
 	}
 	if unknown[0].Field != "fs_type" || unknown[0].Value != "mysteryfs" {
 		t.Fatalf("fs.unknown потерял сведения о поле: %#v", unknown[0])
+	}
+}
+
+// TestKnownFSTypesCoversSpec требует, чтобы экспортируемый KnownFSTypes
+// содержал весь перечень типов ФС из ТЗ §6.2: локальные, Windows-совместимые,
+// оптические/съёмные, сетевые, псевдо-ФС и специальные. Список должен быть
+// отсортирован и не содержать дубликатов, так как он же питает автодополнение.
+func TestKnownFSTypesCoversSpec(t *testing.T) {
+	t.Parallel()
+
+	// Полный перечень ТЗ §6.2.
+	specTypes := []string{
+		// Локальные ФС.
+		"ext2", "ext3", "ext4", "xfs", "btrfs", "f2fs", "reiserfs",
+		// Windows-совместимые.
+		"ntfs", "ntfs-3g", "vfat", "exfat", "msdos",
+		// Оптические и съёмные носители.
+		"iso9660", "udf",
+		// Сетевые ФС.
+		"nfs", "nfs4", "cifs", "smbfs", "sshfs",
+		// Псевдо-ФС.
+		"tmpfs", "proc", "sysfs", "devpts", "swap",
+		// Специальные типы.
+		"overlay", "bind", "auto",
+	}
+	for _, fsType := range specTypes {
+		if !slices.Contains(validator.KnownFSTypes, fsType) {
+			t.Errorf("KnownFSTypes не содержит тип ТЗ §6.2 %q", fsType)
+		}
+	}
+
+	// Типы, которые валидатор знал до единого списка, обязаны остаться.
+	legacyTypes := []string{"ntfs3", "devtmpfs", "cgroup", "cgroup2", "squashfs", "fuse"}
+	for _, fsType := range legacyTypes {
+		if !slices.Contains(validator.KnownFSTypes, fsType) {
+			t.Errorf("KnownFSTypes потерял прежний известный тип %q", fsType)
+		}
+	}
+
+	// Дубликаты ломают предсказуемость автодополнения и лишний раз ходят по списку.
+	seen := make(map[string]struct{}, len(validator.KnownFSTypes))
+	for _, fsType := range validator.KnownFSTypes {
+		if _, exists := seen[fsType]; exists {
+			t.Errorf("KnownFSTypes содержит дубликат %q", fsType)
+		}
+		seen[fsType] = struct{}{}
+	}
+
+	// Сортировка — публичный контракт списка (используется в подсказках формы).
+	if !slices.IsSorted(validator.KnownFSTypes) {
+		t.Errorf("KnownFSTypes должен быть отсортирован: %v", validator.KnownFSTypes)
 	}
 }
 
