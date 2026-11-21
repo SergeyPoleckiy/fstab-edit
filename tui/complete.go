@@ -129,6 +129,9 @@ var fsSpecificMountOptions = map[string][]string{
 	"msdos":   {"utf8", "umask", "dmask", "fmask", "flush"},
 	"ntfs":    {"windows_names", "big_writes", "locale"},
 	"ntfs-3g": {"windows_names", "big_writes", "locale"},
+	// ntfs3 — драйвер ядра (не FUSE ntfs-3g): опции nls/sparse/prealloc,
+	// discard там осмыслен и предлагается (ntfs3 НЕ входит в noDiscardFSTypes).
+	"ntfs3": {"nls", "sparse", "prealloc", "discard"},
 }
 
 // noDiscardFSTypes перечисляет типы ФС, для которых опция discard не
@@ -142,17 +145,22 @@ var noDiscardFSTypes = map[string]bool{
 
 // optionHints возвращает варианты подстановки для поля options с учётом типа
 // ФС и уже введённого значения. Префикс фильтрации — последний токен current
-// после запятой: "defaults,noa" фильтрует по "noa". Возвращаются полные токены
-// (не префикс+хвост): подстановка заменяет последний токен целиком. Набор —
-// базовый плюс per-FS добавки минус контекстно исключённые опции.
+// после запятой: "defaults,noa" фильтрует по "noa". Пробелы после запятой
+// обрезаются ("defaults, noa" — тот же префикс "noa"): при подстановке
+// applyHint сохраняет только текст до запятой включительно, так что лишний
+// пробел не копируется в результат. Возвращаются полные токены (не префикс+
+// хвост): подстановка заменяет последний токен целиком. Набор — базовый плюс
+// per-FS добавки минус контекстно исключённые опции.
 func optionHints(fsType, current string) []string {
 	// Префикс — последний токен после запятой; до запятой значение не трогаем.
 	prefix := current
 	if idx := strings.LastIndex(current, ","); idx >= 0 {
-		prefix = current[idx+1:]
+		prefix = strings.TrimLeft(current[idx+1:], " ")
 	}
-	// fuse.sshfs и подобные обслуживаются как sshfs: lookup идёт по суффиксу.
-	normalized := strings.TrimPrefix(fsType, "fuse.")
+	// Нормализация типа ФС: поле формы может содержать мусировку регистра,
+	// краевые пробелы или fuse.-префикс ("EXT4", "ext4 ", "fuse.sshfs") —
+	// lookup идёт по чистому нижнему регистру без префикса.
+	normalized := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fsType)), "fuse.")
 
 	candidates := make([]string, 0, len(baseMountOptions)+8)
 	seen := make(map[string]bool, len(baseMountOptions)+8)

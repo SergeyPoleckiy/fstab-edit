@@ -401,11 +401,16 @@ func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.form.applyHint()
 		return m, nil
 	case "ctrl+p":
-		// Предыдущая подсказка: цикл по кругу, -1 уходит на последний вариант.
+		// Предыдущая подсказка: шаг назад и обёртка по кругу. С -1 (ничего
+		// не выбрано) и с 0 уходит на последний вариант — обе точки ведут себя
+		// одинаково предсказуемо.
 		if len(m.form.hints) == 0 {
 			return m, nil
 		}
-		m.form.hintIdx = (m.form.hintIdx - 1 + len(m.form.hints)) % len(m.form.hints)
+		m.form.hintIdx--
+		if m.form.hintIdx < 0 {
+			m.form.hintIdx = len(m.form.hints) - 1
+		}
 		m.form.applyHint()
 		return m, nil
 	case "enter":
@@ -485,18 +490,27 @@ func (m model) viewForm() string {
 }
 
 // formHintsView рендерит панель автодополнения: строка-заголовок с клавишами
-// листания (приглушённая) и до maxFormHints строк "<value>  <info>"; выбранный
-// hintIdx подсвечен через theme.Selected. Панель показывается только при
-// непустом списке вариантов: для полей без подсказок и пустого списка
-// устройств viewForm остаётся как до автодополнения.
+// листания (приглушённая) и окно в maxFormHints строк "<value>  <info>".
+// Окно скроллится за курсором: пока выбранный hintIdx виден, окно стоит на
+// месте; курсор ушёл ниже окна — окно догоняет его (как прокрутка экрана B),
+// поэтому листание Ctrl+N за пределы десятой строки не теряет курсор.
+// Выбранная строка подсвечена через theme.Selected. Панель показывается
+// только при непустом списке вариантов: для полей без подсказок и пустого
+// списка устройств viewForm остаётся как до автодополнения.
 func (m model) formHintsView() string {
 	if len(m.form.hints) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("\n" + m.theme.Muted.Render(Tr(m.opts.Lang, "hints_keys")) + "\n")
-	shown := min(len(m.form.hints), maxFormHints)
-	for i := 0; i < shown; i++ {
+	// Сдвиг окна: курсор ниже окна — окно подтягивается так, чтобы курсор
+	// оказался на последней видимой строке; вверх окно не возвращается
+	// раньше времени (как скролл read-only экранов).
+	start := 0
+	if m.form.hintIdx >= maxFormHints {
+		start = m.form.hintIdx - maxFormHints + 1
+	}
+	for i := start; i < min(len(m.form.hints), start+maxFormHints); i++ {
 		hint := m.form.hints[i]
 		// Значение усечено до 32 символов, чтобы правая колонка Info не уплывала
 		// на узких терминалах; Info уже ограничена maxDeviceHintInfoLen.

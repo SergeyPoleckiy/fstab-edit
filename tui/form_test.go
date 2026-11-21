@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -358,5 +359,98 @@ func TestFormHintsPanelRendered(t *testing.T) {
 	empty := testFormModel(t, nil)
 	if strings.Contains(empty.View(), "Ctrl+N/Ctrl+P") {
 		t.Fatalf("панель показана без устройств:\n%s", empty.View())
+	}
+}
+
+// testFormManyDevices собирает n устройств с различимыми UUID — нужны
+// для тестов циклического листания и скролла окна панели подсказок.
+func testFormManyDevices(n int) []sysutil.BlockDevice {
+	devices := make([]sysutil.BlockDevice, 0, n)
+	for i := 0; i < n; i++ {
+		devices = append(devices, sysutil.BlockDevice{
+			Path:   fmt.Sprintf("/dev/sd%c1", 'a'+i),
+			Type:   "part",
+			FSType: "ext4",
+			Size:   "100G",
+			UUID:   fmt.Sprintf("UUID-%02d", i),
+		})
+	}
+	return devices
+}
+
+// pressHintKey отправляет одну клавишу листания подсказок и возвращает модель.
+func pressHintKey(m model, key tea.KeyType) model {
+	updated, _ := m.Update(tea.KeyMsg{Type: key})
+	return updated.(model)
+}
+
+// TestFormHintWrapAround проверяет циклическое листание по полному списку:
+// Ctrl+N с последнего индекса оборачивается на первый, Ctrl+P с -1 и с 0
+// уходит на последний вариант.
+func TestFormHintWrapAround(t *testing.T) {
+	devices := testFormManyDevices(3)
+
+	// Ctrl+N: -1 → 0 → 1 → 2 → обёртка на 0.
+	m := testFormModel(t, devices)
+	for i := 0; i < 3; i++ {
+		m = pressHintKey(m, tea.KeyCtrlN)
+	}
+	if m.form.hintIdx != 2 {
+		t.Fatalf("hintIdx после 3×Ctrl+N: %d, ожидался 2 (последний)", m.form.hintIdx)
+	}
+	m = pressHintKey(m, tea.KeyCtrlN)
+	if m.form.hintIdx != 0 {
+		t.Fatalf("hintIdx после обёртки: %d, ожидался 0", m.form.hintIdx)
+	}
+	if got := m.form.inputs[0].Value(); got != "UUID=UUID-00" {
+		t.Fatalf("поле device после обёртки: %q, ожидалось первое устройство", got)
+	}
+
+	// Ctrl+P с -1 (ничего не выбрано) — сразу последний вариант.
+	m = testFormModel(t, devices)
+	m = pressHintKey(m, tea.KeyCtrlP)
+	if m.form.hintIdx != 2 {
+		t.Fatalf("hintIdx после Ctrl+P с -1: %d, ожидался 2 (последний)", m.form.hintIdx)
+	}
+	if got := m.form.inputs[0].Value(); got != "UUID=UUID-02" {
+		t.Fatalf("поле device: %q, ожидалось последнее устройство", got)
+	}
+
+	// Ctrl+P с 0 — тоже последний вариант (шаг назад по кругу).
+	m = pressHintKey(m, tea.KeyCtrlP) // 2 → 1
+	m = pressHintKey(m, tea.KeyCtrlP) // 1 → 0
+	if m.form.hintIdx != 0 {
+		t.Fatalf("hintIdx: %d, ожидался 0", m.form.hintIdx)
+	}
+	m = pressHintKey(m, tea.KeyCtrlP)
+	if m.form.hintIdx != 2 {
+		t.Fatalf("hintIdx после Ctrl+P с 0: %d, ожидался 2 (последний)", m.form.hintIdx)
+	}
+}
+
+// TestFormHintsWindowScrollsWithCursor проверяет скролл окна панели: при
+// листании за пределы maxFormHints строк выбранный вариант остаётся виден в
+// View (окно догоняет курсор), а первый вариант уходит за верхнюю границу.
+func TestFormHintsWindowScrollsWithCursor(t *testing.T) {
+	devices := testFormManyDevices(15)
+	m := testFormModel(t, devices)
+	if len(m.form.hints) != 15 {
+		t.Fatalf("подсказок: %d, ожидалось 15", len(m.form.hints))
+	}
+	// 13 раз Ctrl+N: hintIdx = 12 — ниже окна в 10 строк.
+	for i := 0; i < 13; i++ {
+		m = pressHintKey(m, tea.KeyCtrlN)
+	}
+	if m.form.hintIdx != 12 {
+		t.Fatalf("hintIdx: %d, ожидался 12", m.form.hintIdx)
+	}
+	view := m.View()
+	selected := m.form.hints[12].Value // "UUID=UUID-12"
+	if !strings.Contains(view, selected) {
+		t.Fatalf("выбранный вариант %q не виден в View (окно не скроллится):\n%s", selected, view)
+	}
+	if strings.Contains(view, m.form.hints[0].Value) {
+		t.Fatalf("первый вариант %q всё ещё виден — окно не сдвинулось:\n%s",
+			m.form.hints[0].Value, view)
 	}
 }

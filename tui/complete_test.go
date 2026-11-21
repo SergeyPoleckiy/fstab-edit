@@ -152,3 +152,59 @@ func TestDeviceHintsInfoFormat(t *testing.T) {
 		t.Fatalf("Info без ФС: %q, ожидалось %q", bare, "disk 476.9G")
 	}
 }
+
+// TestOptionHintsEdgeTokens проверяет граничные токены: trailing comma
+// ("defaults," — пустой последний токен даёт весь набор), leading comma
+// (",noatime" — префикс "noatime") и пробел после запятой ("defaults, noa" —
+// префикс "noa", панель не ломается).
+func TestOptionHintsEdgeTokens(t *testing.T) {
+	trailing := optionHints("ext4", "defaults,")
+	if !slices.Contains(trailing, "rw") || !slices.Contains(trailing, "commit") {
+		t.Fatalf("trailing comma: %v, ожидался весь набор с per-FS добавками", trailing)
+	}
+	leading := optionHints("ext4", ",noatime")
+	if !slices.Equal(leading, []string{"noatime"}) {
+		t.Fatalf("leading comma: %v, ожидалось [noatime]", leading)
+	}
+	spaced := optionHints("ext4", "defaults, noa")
+	if !slices.Equal(spaced, []string{"noatime", "noauto"}) {
+		t.Fatalf("пробел после запятой: %v, ожидалось [noatime noauto]", spaced)
+	}
+}
+
+// TestOptionHintsNormalizedFSType проверяет нормализацию типа ФС: регистр
+// ("EXT4") и краевые пробелы ("ext4 ") не мешают per-FS добавкам и
+// контекстным исключениям.
+func TestOptionHintsNormalizedFSType(t *testing.T) {
+	upper := optionHints("EXT4", "comm")
+	if !slices.Equal(upper, []string{"commit"}) {
+		t.Fatalf("EXT4: %v, ожидалось [commit]", upper)
+	}
+	spaced := optionHints("ext4 ", "di")
+	if !slices.Equal(spaced, []string{"discard"}) {
+		t.Fatalf("«ext4 »: %v, ожидалось [discard]", spaced)
+	}
+	// Для NFS нормализация тоже работает: discard исключён даже с мусором.
+	nfs := optionHints(" NFS4 ", "di")
+	if slices.Contains(nfs, "discard") {
+		t.Fatalf("discard предложен для « NFS4 »: %v", nfs)
+	}
+}
+
+// TestOptionHintsNtfs3Specific проверяет per-FS добавки драйвера ядра ntfs3:
+// nls/sparse/prealloc предлагаются, discard осмыслен и НЕ исключён, а опции
+// FUSE ntfs-3g (windows_names, big_writes, locale) для ntfs3 не предлагаются.
+func TestOptionHintsNtfs3Specific(t *testing.T) {
+	if hints := optionHints("ntfs3", "nl"); !slices.Equal(hints, []string{"nls"}) {
+		t.Fatalf("ntfs3 «nl»: %v, ожидалось [nls]", hints)
+	}
+	if hints := optionHints("ntfs3", "di"); !slices.Equal(hints, []string{"discard"}) {
+		t.Fatalf("ntfs3 «di»: %v, ожидалось [discard]", hints)
+	}
+	all := optionHints("ntfs3", "")
+	for _, fuseOnly := range []string{"windows_names", "big_writes", "locale"} {
+		if slices.Contains(all, fuseOnly) {
+			t.Fatalf("опция FUSE ntfs-3g %q предложена для ntfs3: %v", fuseOnly, all)
+		}
+	}
+}
