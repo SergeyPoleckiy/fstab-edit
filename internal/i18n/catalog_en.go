@@ -53,9 +53,10 @@ var catalogEN = map[string]string{
 	"chooser.line_prompt":          "line number: ",
 
 	// --- Ключи cmd config/logger wiring (Task 6) ---
-	"config.security": "configuration %s rejected by security check",
-	"config.invalid":  "configuration %s is invalid",
-	"error.log.open":  "open log file %s",
+	"config.security":  "configuration %s rejected by security check",
+	"config.invalid":   "configuration %s is invalid",
+	"error.log.open":   "open log file %s",
+	"error.tui.launch": "launch TUI: %s",
 
 	// --- Ключи cmd help (Task 5): Short/Long команд и usage флагов ---
 	// EN-значения — перевод RU-каталога; ключи и порядок зеркальны catalogRU.
@@ -162,14 +163,12 @@ var catalogEN = map[string]string{
 	"tui.reload_done":             "file reloaded",
 	"tui.save_result_title":       "Save result",
 	"tui.save_success":            "saved (backup %s)",
-	"tui.save_failed":             "save failed",
 	"tui.save_verified":           "post-write verification passed",
 	"tui.save_noop":               "no changes, file not rewritten",
 	"tui.rolled_back":             "automatic rollback completed, target restored",
 	"tui.rollback_failed":         "rollback failed: %s",
 	"tui.recovery_paths":          "recovery paths: target=%s backup=%s metadata=%s",
 	"tui.save_conflict_hint":      "file changed externally: reload (F5) or cancel",
-	"tui.conflict":                "file changed externally: reload (F5) or cancel",
 	"tui.confirm_quit":            "unsaved changes, quit? [y/N]",
 	"tui.confirm_reload":          "unsaved changes, reload file? [y/N]",
 	"tui.form_title_add":          "New entry",
@@ -181,7 +180,6 @@ var catalogEN = map[string]string{
 	"tui.form_label_dump":         "Dump",
 	"tui.form_label_pass":         "Pass",
 	"tui.form_label_comment":      "Comment (optional)",
-	"tui.form_apply":              "Enter — apply, Esc — cancel, Tab — field, d — diff",
 	"tui.form_applied":            "entry applied",
 	"tui.form_no_changes":         "no changes",
 	"tui.history_title":           "Backup history",

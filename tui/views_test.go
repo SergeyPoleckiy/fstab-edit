@@ -10,8 +10,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/exp/teatest"
 
 	"fstab-edit/internal/backup"
 	"fstab-edit/internal/sysutil"
@@ -215,5 +217,115 @@ func TestFormDiffText(t *testing.T) {
 	}
 	if got := f.diffText(nil); got != "" {
 		t.Fatalf("diffText при nil-документе: %q", got)
+	}
+}
+
+// TestConfirmQuitBranching покрывает ветвление подтверждения выхода (ТЗ §9.2):
+// чистая сессия завершается немедленно, dirty — через модальное подтверждение
+// (default No: любая клавиша кроме подтверждения возвращает на таблицу).
+func TestConfirmQuitBranching(t *testing.T) {
+	// Чистая сессия: 'q' завершает программу без подтверждения.
+	m := testModel(t, testOptions(t, writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\n")))
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	m = updated.(model)
+	if cmd == nil || m.ScreenNow() != ScreenTable {
+		t.Fatalf("чистая сессия: ожидался немедленный quit, screen=%v cmd=%v", m.ScreenNow(), cmd)
+	}
+
+	// Dirty-сессия: 'q'/ctrl+q/f10/ctrl+c открывают подтверждение, quit не выдан.
+	dirty := func() model {
+		mm := testModel(t, testOptions(t, writeTestFstab(t,
+			"UUID=aaa / ext4 defaults 0 1\nUUID=bbb /mnt/data ext4 rw 0 2\n")))
+		updated, _ := mm.Update(tea.KeyMsg{Type: tea.KeyDelete})
+		mm = updated.(model)
+		if !mm.session.dirty {
+			t.Fatal("после Del сессия должна стать dirty")
+		}
+		return mm
+	}
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune{'q'}},
+		{Type: tea.KeyCtrlQ},
+		{Type: tea.KeyF10},
+		{Type: tea.KeyCtrlC},
+	} {
+		m := dirty()
+		updated, cmd := m.Update(key)
+		m = updated.(model)
+		if cmd != nil || m.ScreenNow() != ScreenConfirmQuit {
+			t.Fatalf("%v: ожидался ScreenConfirmQuit без quit, screen=%v cmd=%v",
+				key.String(), m.ScreenNow(), cmd)
+		}
+	}
+
+	// Отказ ('n') возвращает на таблицу без выхода, dirty-флаг сохраняется.
+	m = dirty()
+	m.screen = ScreenConfirmQuit
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = updated.(model)
+	if cmd != nil || m.ScreenNow() != ScreenTable || !m.session.dirty {
+		t.Fatalf("отказ: screen=%v cmd=%v dirty=%v", m.ScreenNow(), cmd, m.session.dirty)
+	}
+
+	// Подтверждение ('y') выдаёт quit; модальный экран рендерит предупреждение.
+	m = dirty()
+	m.screen = ScreenConfirmQuit
+	if view := m.View(); !strings.Contains(view, "есть несохранённые изменения") {
+		t.Fatalf("модальный экран выхода: %q", view)
+	}
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("подтверждение выхода не выдало quit")
+	}
+}
+
+// TestQuitWithUnsavedChangesConfirm — сквозной сценарий: мутация, выход по 'q'
+// запрашивает подтверждение, отказ сохраняет несохранённое изменение в сессии,
+// повторный выход с подтверждением завершает программу; target на диске не
+// изменился.
+func TestQuitWithUnsavedChangesConfirm(t *testing.T) {
+	target := writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\nUUID=bbb /mnt/data ext4 rw 0 2\n")
+	m := NewModel(testOptions(t, target))
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(100, 30))
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return strings.Contains(string(b), "/mnt/data")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// Del — удаление первой записи, dirty-индикатор в заголовке.
+	tm.Send(tea.KeyMsg{Type: tea.KeyDelete})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		s := string(b)
+		return !strings.Contains(s, "UUID=aaa") && strings.Contains(s, "*")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// 'q' — модальное подтверждение выхода (default No).
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return strings.Contains(string(b), "есть несохранённые изменения")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// Отказ: сессия вернулась на таблицу, удаление осталось несохранённым.
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		s := string(b)
+		return !strings.Contains(s, "UUID=aaa") && strings.Contains(s, "*") &&
+			!strings.Contains(s, "есть несохранённые изменения")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// Повторный выход с подтверждением завершает программу.
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return strings.Contains(string(b), "есть несохранённые изменения")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("прочитать target: %v", err)
+	}
+	if !strings.Contains(string(data), "UUID=aaa") {
+		t.Fatalf("target на диске изменился несохранённой сессией: %q", data)
 	}
 }

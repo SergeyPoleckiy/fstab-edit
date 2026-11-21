@@ -183,5 +183,10 @@ func TestFormAddFlow(t *testing.T) {
 	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	// Dirty-сессия: выход запрашивает подтверждение (ТЗ §9.2, default No).
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return strings.Contains(string(b), "есть несохранённые изменения")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
 }

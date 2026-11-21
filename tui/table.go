@@ -16,7 +16,13 @@ import (
 func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	entries := m.entryIndexes()
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "ctrl+c", "q", "ctrl+q", "f10":
+		// ТЗ §9.2: выход при несохранённых изменениях требует подтверждения
+		// (default No); чистая сессия завершается немедленно.
+		if m.session != nil && m.session.dirty {
+			m.screen = ScreenConfirmQuit
+			return m, nil
+		}
 		return m, tea.Quit
 	case "up", "k":
 		if m.cursor > 0 {

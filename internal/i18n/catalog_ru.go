@@ -53,9 +53,10 @@ var catalogRU = map[string]string{
 	"chooser.line_prompt":          "номер строки: ",
 
 	// --- Ключи cmd config/logger wiring (Task 6) ---
-	"config.security": "конфигурация %s отклонена проверкой безопасности",
-	"config.invalid":  "конфигурация %s некорректна",
-	"error.log.open":  "открыть журнал %s",
+	"config.security":  "конфигурация %s отклонена проверкой безопасности",
+	"config.invalid":   "конфигурация %s некорректна",
+	"error.log.open":   "открыть журнал %s",
+	"error.tui.launch": "запустить TUI: %s",
 
 	// --- Ключи cmd help (Task 5): Short/Long команд и usage флагов ---
 	// RU-значения дословно повторяют текущие строки cmd; EN — перевод.
@@ -163,14 +164,12 @@ var catalogRU = map[string]string{
 	"tui.reload_done":             "файл перезагружен",
 	"tui.save_result_title":       "Результат сохранения",
 	"tui.save_success":            "сохранено (backup %s)",
-	"tui.save_failed":             "сохранение не выполнено",
 	"tui.save_verified":           "проверка после записи пройдена",
 	"tui.save_noop":               "изменений нет, файл не перезаписан",
 	"tui.rolled_back":             "автоматический rollback выполнен, target восстановлен",
 	"tui.rollback_failed":         "rollback не выполнен: %s",
 	"tui.recovery_paths":          "пути восстановления: target=%s backup=%s metadata=%s",
 	"tui.save_conflict_hint":      "файл изменён извне: перезагрузите (F5) или отмените",
-	"tui.conflict":                "файл изменён извне: перезагрузите (F5) или отмените",
 	"tui.confirm_quit":            "есть несохранённые изменения, выйти? [y/N]",
 	"tui.confirm_reload":          "есть несохранённые изменения, перезагрузить файл? [y/N]",
 	"tui.form_title_add":          "Новая запись",
@@ -182,7 +181,6 @@ var catalogRU = map[string]string{
 	"tui.form_label_dump":         "Dump",
 	"tui.form_label_pass":         "Pass",
 	"tui.form_label_comment":      "Комментарий (необязательно)",
-	"tui.form_apply":              "Enter — применить, Esc — отмена, Tab — поле, d — diff",
 	"tui.form_applied":            "запись применена",
 	"tui.form_no_changes":         "изменений нет",
 	"tui.history_title":           "История резервных копий",

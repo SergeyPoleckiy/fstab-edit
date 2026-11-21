@@ -5,8 +5,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
 	"fstab-edit/internal/cliapp"
@@ -58,11 +56,11 @@ func (a *App) launchTUI() error {
 		launcher = tui.Run
 	}
 	if err := launcher(opts); err != nil {
-		// Сбой запуска TUI — io error (exit 6): сообщение не из каталога,
-		// потому что bubbletea возвращает нетипизированную ошибку терминала.
+		// Сбой запуска TUI — io error (exit 6): bubbletea возвращает
+		// нетипизированную ошибку терминала, она подставляется в перевод ключа.
 		return &cliapp.ExitError{
 			Code:    cliapp.ExitIO,
-			Message: fmt.Sprintf("запустить TUI: %v", err),
+			Message: i18n.Tf(a.lang, "error.tui.launch", err.Error()),
 			Cause:   err,
 		}
 	}

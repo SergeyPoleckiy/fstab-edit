@@ -348,7 +348,7 @@ func TestFormatCreated(t *testing.T) {
 		name, raw, want string
 	}{
 		{"rfc3339nano utc", "2026-01-02T10:00:00Z", "2026-01-02 10:00:00"},
-		{"rfc3339nano offset", "2026-01-02T13:00:00.5+03:00", "2026-01-02 13:00:00"},
+		{"rfc3339nano offset → utc", "2026-01-02T13:00:00.5+03:00", "2026-01-02 10:00:00"},
 		{"fallback raw", "not-a-time", "not-a-time"},
 		{"fallback empty", "", ""},
 	}

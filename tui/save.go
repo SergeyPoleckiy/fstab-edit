@@ -145,6 +145,17 @@ func (m model) updateConfirmReload(msgKey string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateConfirmQuit обрабатывает модальное подтверждение выхода при
+// несохранённых изменениях (ТЗ §9.2): подтверждение завершает программу,
+// всё остальное (default No, ТЗ §15) возвращает на таблицу без выхода.
+func (m model) updateConfirmQuit(msgKey string) (tea.Model, tea.Cmd) {
+	if i18n.AcceptYes(m.opts.Lang, msgKey) {
+		return m, tea.Quit
+	}
+	m.screen = ScreenTable
+	return m, nil
+}
+
 // viewSaveResult рендерит итог сохранения: успех — backup ID + строка
 // проверки; ошибка — описание + состояние rollback. После неуспешной записи
 // единственное действие — Esc: «оставить файл» не предлагается (ТЗ §9.2).

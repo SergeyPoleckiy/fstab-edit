@@ -37,6 +37,9 @@ const (
 	// ScreenConfirmReload — модальное подтверждение перезагрузки target (F5
 	// при несохранённых изменениях; default No, ТЗ §15).
 	ScreenConfirmReload
+	// ScreenConfirmQuit — модальное подтверждение выхода при несохранённых
+	// изменениях (q/Ctrl+Q/Ctrl+C/F10; default No, ТЗ §9.2 и §15).
+	ScreenConfirmQuit
 )
 
 // Options — параметры запуска TUI (все уже резолвлены cmd-слоем).
@@ -156,8 +159,8 @@ func sudoUID() string {
 func (m model) Init() tea.Cmd { return nil }
 
 // Update обрабатывает сообщения. Навигация общая для всех экранов:
-// Esc возвращает на таблицу; выход без подтверждения (подтверждение при
-// несохранённых изменениях вынесено за пределы этапа 2).
+// Esc возвращает на таблицу; выход при несохранённых изменениях идёт через
+// модальное подтверждение ScreenConfirmQuit (ТЗ §9.2).
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -168,6 +171,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateForm(msg)
 		case ScreenConfirmReload:
 			return m.updateConfirmReload(msg.String())
+		case ScreenConfirmQuit:
+			return m.updateConfirmQuit(msg.String())
 		case ScreenMounts, ScreenLog, ScreenDiff:
 			return m.updateScrollable(msg)
 		case ScreenHistory:
@@ -208,6 +213,8 @@ func (m model) View() string {
 		return m.viewHelp()
 	case ScreenConfirmReload:
 		return m.theme.Warning.Render(Tr(m.opts.Lang, "confirm_reload")) + "\n"
+	case ScreenConfirmQuit:
+		return m.theme.Warning.Render(Tr(m.opts.Lang, "confirm_quit")) + "\n"
 	default:
 		return Tr(m.opts.Lang, "screen_placeholder")
 	}

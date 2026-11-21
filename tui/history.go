@@ -42,14 +42,14 @@ func loadHistory(m *model) historyModel {
 }
 
 // formatCreated приводит RFC3339Nano timestamp метаданных к читаемому виду
-// «2006-01-02 15:04:05» (UTC, как и в метаданных); неразбираемое значение
-// показывается как есть — fallback безопаснее пустой ячейки.
+// «2006-01-02 15:04:05» в UTC (так же, как и в метаданных); неразбираемое
+// значение показывается как есть — fallback безопаснее пустой ячейки.
 func formatCreated(raw string) string {
 	created, err := time.Parse(time.RFC3339Nano, raw)
 	if err != nil {
 		return raw
 	}
-	return created.Format("2006-01-02 15:04:05")
+	return created.UTC().Format("2006-01-02 15:04:05")
 }
 
 // Selected возвращает копию под курсором. Вызывается только при непустом
