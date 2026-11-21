@@ -34,6 +34,9 @@ const (
 	ScreenLog
 	// ScreenHelp — помощь (клавиша F1 или ?, Task 5).
 	ScreenHelp
+	// ScreenConfirmReload — модальное подтверждение перезагрузки target (F5
+	// при несохранённых изменениях; default No, ТЗ §15).
+	ScreenConfirmReload
 )
 
 // options — параметры запуска TUI (все уже резолвлены cmd-слоем).
@@ -74,7 +77,21 @@ type model struct {
 	status   string
 	// session несохранённые изменения и undo-стек; nil при ошибке загрузки
 	// (loadErr-экран мутации недоступны, но доступ к полю защищён nil-check).
-	session *sessionState
+	session  *sessionState
+	lastSave saveOutcome // итог последней попытки сохранения (ScreenSaveResult)
+}
+
+// deps возвращает границы отказа модели: явно заданные через options.Deps
+// (тесты) или production-набор, материализованный лениво. NewModel не
+// сохраняет production-набор в options, чтобы zero-value model оставался
+// рабочим в тестах Task 1/2.
+func (m *model) deps() *Deps {
+	if m.opts.Deps != nil {
+		return m.opts.Deps
+	}
+	d := ProductionDeps(loggerOptions(m.opts))
+	m.opts.Deps = &d
+	return m.opts.Deps
 }
 
 // NewModel загружает target и собирает начальное состояние. Ошибка загрузки
@@ -127,14 +144,16 @@ func sudoUID() string {
 func (m model) Init() tea.Cmd { return nil }
 
 // Update обрабатывает сообщения. Навигация общая для всех экранов:
-// Esc возвращает на таблицу, выход — с подтверждением при dirty (Task 3
-// расширит confirmQuit; здесь — заглушка без dirty-логики).
+// Esc возвращает на таблицу; подтверждение выхода при dirty подключится
+// вместе с полноценным циклом quit (Task 7), здесь — заглушка.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch m.screen {
 		case ScreenTable:
 			return m.updateTable(msg)
+		case ScreenConfirmReload:
+			return m.updateConfirmReload(msg.String())
 		default:
 			if msg.String() == "esc" {
 				m.screen = ScreenTable
@@ -155,6 +174,10 @@ func (m model) View() string {
 	switch m.screen {
 	case ScreenTable:
 		return m.viewTable()
+	case ScreenSaveResult:
+		return m.viewSaveResult()
+	case ScreenConfirmReload:
+		return m.theme.Warning.Render(Tr(m.opts.Lang, "confirm_reload")) + "\n"
 	default:
 		return Tr(m.opts.Lang, "screen_placeholder")
 	}

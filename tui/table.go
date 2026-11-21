@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -63,9 +64,29 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = m.theme.Muted.Render(Tr(m.opts.Lang, "undo_empty"))
 		}
+	case "ctrl+s", "f2":
+		// Сохранение через transaction: журнал → ExecuteTransaction →
+		// событие журнала → сброс сессии. Итог показывает ScreenSaveResult.
+		if m.session == nil {
+			break
+		}
+		m.lastSave = save(context.Background(), &m)
+		m.screen = ScreenSaveResult
+	case "f5":
+		// Перезагрузка target: при несохранённых изменениях — модальное
+		// подтверждение (default No, ТЗ §15), иначе немедленно.
+		if m.session == nil {
+			break
+		}
+		if m.session.dirty {
+			m.screen = ScreenConfirmReload
+		} else {
+			m.reloadFromDisk()
+			m.status = Tr(m.opts.Lang, "reload_done")
+		}
 	}
-	// Enter (редактирование/добавление форм), Ins, F2, Ctrl+S (сохранение),
-	// F5 (перезагрузка) подключаются Task 3–5.
+	// Enter (редактирование/добавление форм), Ins (добавление), F2-совмещённый
+	// с ctrl+s подключены; остальные экраны — Task 4–6.
 	return m, nil
 }
 
