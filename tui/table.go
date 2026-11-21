@@ -33,6 +33,7 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mounts = loadMounts(context.Background(), &m)
 		m.screen = ScreenMounts
 	case "h":
+		m.history = loadHistory(&m)
 		m.screen = ScreenHistory
 	case "l":
 		m.logEvents = loadLog(&m, screenPageSize)

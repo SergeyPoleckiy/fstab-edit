@@ -87,6 +87,9 @@ type model struct {
 	mounts    mountsModel
 	logEvents logModel
 	diff      diffModel
+	// history — данные экрана истории backup (клавиша H, Task 6):
+	// заполняются синхронно в момент входа на экран.
+	history historyModel
 }
 
 // deps возвращает границы отказа модели: явно заданные через options.Deps
@@ -166,6 +169,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateConfirmReload(msg.String())
 		case ScreenMounts, ScreenLog, ScreenDiff:
 			return m.updateScrollable(msg)
+		case ScreenHistory:
+			return m.updateHistory(msg)
 		default:
 			if msg.String() == "esc" {
 				m.screen = ScreenTable
@@ -194,6 +199,8 @@ func (m model) View() string {
 		return m.viewDiff()
 	case ScreenMounts:
 		return m.viewMounts()
+	case ScreenHistory:
+		return m.viewHistory()
 	case ScreenLog:
 		return m.viewLog()
 	case ScreenHelp:
