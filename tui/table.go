@@ -85,6 +85,32 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.cursor = max(0, n-1)
 			}
 		}
+	case "c":
+		// Переключение комментария записи под курсором: активная запись
+		// комментируется (Comment), закомментированная — включается (Uncomment).
+		// Селектор — физическая строка записи; applyOp даёт undo и dirty бесплатно.
+		if m.session == nil {
+			break
+		}
+		if m.cursor < len(entries) {
+			idx := entries[m.cursor]
+			line := idx + 1
+			commented := m.document.Nodes[idx].Kind == models.NodeCommentedEntry
+			err := m.session.applyOp(m.document, func(d *models.Document) error {
+				var err error
+				if commented {
+					_, err = editor.Uncomment(d, editor.ByLine(line))
+				} else {
+					_, err = editor.Comment(d, editor.ByLine(line))
+				}
+				return err
+			})
+			if err != nil {
+				m.status = m.theme.MarkError(Trf(m.opts.Lang, "comment_failed", err.Error()))
+			} else {
+				m.status = m.theme.Info.Render(Tr(m.opts.Lang, "comment_done"))
+			}
+		}
 	case "ctrl+z":
 		if m.session == nil {
 			break
@@ -103,15 +129,13 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.lastSave = save(context.Background(), &m)
 		m.screen = ScreenSaveResult
 	case "f5":
-		// Перезагрузка target: при несохранённых изменениях — модальное
-		// подтверждение (default No, ТЗ §15), иначе немедленно.
-		if m.session == nil {
-			break
-		}
-		if m.session.dirty {
+		// Перезагрузка target: работает и на loadErr-экране (session == nil) —
+		// reloadFromDisk сам восстанавливает document/session или обновляет
+		// ошибку. При несохранённых изменениях — модальное подтверждение
+		// (default No, ТЗ §15), иначе немедленно.
+		if m.session != nil && m.session.dirty {
 			m.screen = ScreenConfirmReload
-		} else {
-			m.reloadFromDisk()
+		} else if err := m.reloadFromDisk(); err == nil {
 			m.status = Tr(m.opts.Lang, "reload_done")
 		}
 	}

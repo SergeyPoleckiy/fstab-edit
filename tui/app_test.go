@@ -16,6 +16,7 @@ import (
 	"fstab-edit/internal/sysutil"
 	"fstab-edit/internal/transaction"
 	"fstab-edit/internal/writer"
+	"fstab-edit/pkg/models"
 )
 
 // fakeRunner — заглушка sysutil.CommandRunner: любой вызов считается успешным
@@ -107,5 +108,93 @@ func TestDeleteAndUndoFlow(t *testing.T) {
 	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+}
+
+// TestCommentToggleBranches проверяет ветвление клавиши 'c' на уровне Update:
+// активная запись комментируется (Kind → NodeCommentedEntry), закомментированная
+// включается (Kind → NodeEntry); обе мутации проходят через applyOp, поэтому
+// dirty выставлен, а ctrl+z откатывает изменения в исходном порядке.
+func TestCommentToggleBranches(t *testing.T) {
+	target := writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\n#UUID=bbb /mnt/data ext4 rw 0 2\n")
+	m := testModel(t, testOptions(t, target))
+	if m.document.Nodes[0].Kind != models.NodeEntry {
+		t.Fatal("первая запись должна быть активной")
+	}
+	if m.document.Nodes[1].Kind != models.NodeCommentedEntry {
+		t.Fatal("вторая запись должна быть закомментированной")
+	}
+
+	pressC := func(m model) model {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+		return updated.(model)
+	}
+
+	// Курсор на активной записи: 'c' комментирует её.
+	m = pressC(m)
+	if m.document.Nodes[0].Kind != models.NodeCommentedEntry {
+		t.Fatal("'c' на активной записи должна давать NodeCommentedEntry")
+	}
+	if !m.session.dirty {
+		t.Fatal("после комментария dirty обязан быть true")
+	}
+
+	// Курсор на закомментированной записи: 'c' включает её обратно.
+	m.cursor = 1
+	m = pressC(m)
+	if m.document.Nodes[1].Kind != models.NodeEntry {
+		t.Fatal("'c' на закомментированной записи должна давать NodeEntry")
+	}
+
+	// Два undo возвращают документ в исходную сериализацию.
+	undo := func(m model) model {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlZ})
+		return updated.(model)
+	}
+	m = undo(m)
+	if m.document.Nodes[1].Kind != models.NodeCommentedEntry {
+		t.Fatal("первый undo должен вернуть закомментированную запись")
+	}
+	m = undo(m)
+	if m.document.Nodes[0].Kind != models.NodeEntry {
+		t.Fatal("второй undo должен вернуть активную запись")
+	}
+	if m.session.dirty {
+		t.Fatal("после полного undo dirty должен исчезнуть")
+	}
+}
+
+// TestCommentToggleFlow проверяет сквозной сценарий клавиши 'c' в TTY: активная
+// запись под курсором комментируется (появляется dirty-индикатор "*", в статусе
+// — comment_done), затем 'j'+'c' на закомментированной записи включает её.
+func TestCommentToggleFlow(t *testing.T) {
+	target := writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\n#UUID=bbb /mnt/data ext4 rw 0 2\n")
+	m := NewModel(testOptions(t, target))
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(100, 30))
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return strings.Contains(string(b), "/mnt/data")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// 'c' на первой (активной) записи: dirty-индикатор и статус операции.
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		s := string(b)
+		return strings.Contains(s, "*") && strings.Contains(s, "закомментирована/включена")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// 'j' — курсор на вторую (закомментированную) запись; 'c' включает её:
+	// маркер активности второй строки меняется с "-" на "+".
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return strings.Contains(string(b), " 0 2 +")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// Выход с dirty-сессией запрашивает подтверждение (default No, ТЗ §9.2).
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return strings.Contains(string(b), "[y/N]")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
 }

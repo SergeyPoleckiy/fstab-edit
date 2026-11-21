@@ -19,7 +19,7 @@ import (
 func (a *App) buildTuiCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "tui",
-		Short: "интерактивный TUI-редактор fstab",
+		Short: i18n.T(a.lang, "help.cmd.tui.short"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.launchTUI()

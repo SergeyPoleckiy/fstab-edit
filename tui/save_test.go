@@ -294,7 +294,9 @@ func TestReloadResetsSession(t *testing.T) {
 		t.Fatalf("предусловие: сессия не dirty после мутации")
 	}
 
-	m.reloadFromDisk()
+	if err := m.reloadFromDisk(); err != nil {
+		t.Fatalf("reloadFromDisk: %v", err)
+	}
 
 	diskContent, err := os.ReadFile(target)
 	if err != nil {

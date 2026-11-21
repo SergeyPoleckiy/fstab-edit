@@ -237,6 +237,7 @@ func (m model) viewHelp() string {
 		{Tr(m.opts.Lang, "help_key_edit"), Tr(m.opts.Lang, "help_desc_edit")},
 		{Tr(m.opts.Lang, "help_key_add"), Tr(m.opts.Lang, "help_desc_add")},
 		{Tr(m.opts.Lang, "help_key_delete"), Tr(m.opts.Lang, "help_desc_delete")},
+		{Tr(m.opts.Lang, "help_key_comment"), Tr(m.opts.Lang, "help_desc_comment")},
 		{Tr(m.opts.Lang, "help_key_diff"), Tr(m.opts.Lang, "help_desc_diff")},
 		{Tr(m.opts.Lang, "help_key_mounts"), Tr(m.opts.Lang, "help_desc_mounts")},
 		{Tr(m.opts.Lang, "help_key_history"), Tr(m.opts.Lang, "help_desc_history")},

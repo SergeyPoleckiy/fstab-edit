@@ -57,8 +57,8 @@ func formatCreated(raw string) string {
 func (h historyModel) Selected() backup.Backup { return h.Backups[h.Cursor] }
 
 // restoreResult — итог восстановления выбранной копии для показа в TUI.
-// Err nil означает успех; текст ошибки берётся из ExitError.Error() (русский
-// fallback), потому что полные i18n-каталоги истории подключит Task 7.
+// Err nil означает успех; текст ошибки — из каталога по ExitError.MessageKey
+// (русский fallback Message используется, только если ключа нет).
 type restoreResult struct {
 	Result cliapp.RollbackResult
 	Err    *cliapp.ExitError
@@ -79,7 +79,8 @@ func restoreSelected(ctx context.Context, m *model, b backup.Backup) restoreResu
 	out := restoreResult{Result: result, Err: exitErr}
 	if exitErr == nil {
 		// После restore на диске другие байты: перечитываем сессию из target.
-		m.reloadFromDisk()
+		// Ошибка перечитывания уже зафиксирована в статусе reloadFromDisk.
+		_ = m.reloadFromDisk()
 	}
 	return out
 }
@@ -116,8 +117,13 @@ func (m model) updateHistory(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.history.confirm = false
 			result := restoreSelected(context.Background(), &m, m.history.Selected())
 			if result.Err != nil {
-				// Текст — русский fallback ExitError; i18n-ключ подключит Task 7.
-				m.status = m.theme.MarkError(result.Err.Error())
+				// Перевод по MessageKey; без ключа — русский fallback Error().
+				if result.Err.MessageKey != "" {
+					m.status = m.theme.MarkError(
+						i18n.Tf(m.opts.Lang, result.Err.MessageKey, result.Err.MessageArgs...))
+				} else {
+					m.status = m.theme.MarkError(result.Err.Error())
+				}
 			} else {
 				m.status = m.theme.Info.Render(Tr(m.opts.Lang, "history_restore_ok"))
 			}

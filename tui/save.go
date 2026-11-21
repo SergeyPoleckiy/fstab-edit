@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -36,7 +35,7 @@ func save(ctx context.Context, m *model) saveOutcome {
 	if m.session == nil {
 		out.Err = &transaction.TransactionError{
 			Kind: transaction.FailureValidation,
-			Err:  errors.New("сессия недоступна: документ не загружен"),
+			Err:  errors.New(Tr(m.opts.Lang, "save_no_session")),
 		}
 		return out
 	}
@@ -48,7 +47,7 @@ func save(ctx context.Context, m *model) saveOutcome {
 	if err != nil {
 		out.Err = &transaction.TransactionError{
 			Kind: transaction.FailureIO,
-			Err:  fmt.Errorf("открыть журнал перед сохранением: %w", err),
+			Err:  errors.New(Trf(m.opts.Lang, "save_log_open_failed", err.Error())),
 		}
 		return out
 	}
@@ -120,26 +119,33 @@ func save(ctx context.Context, m *model) saveOutcome {
 
 // reloadFromDisk перечитывает target в модель, сбрасывая сессию и курсор.
 // F5; подтверждение при dirty — на уровне Update (ScreenConfirmReload).
-// Task 6 переиспользует этот метод для перезагрузки после конфликта.
-func (m *model) reloadFromDisk() {
+// Работает и при ошибке загрузки (loadErr-экран): успех восстанавливает
+// document/session и сбрасывает loadErr, повторная ошибка обновляет loadErr
+// и возвращается вызывающему. Статус при ошибке уже выставлен здесь.
+func (m *model) reloadFromDisk() error {
 	deps := m.deps()
 	snapshot, err := deps.ReadSnapshot(m.opts.Target)
 	if err != nil {
+		m.loadErr = err
 		m.status = m.theme.MarkError(Trf(m.opts.Lang, "load_error", m.opts.Target, err.Error()))
-		return
+		return err
 	}
 	m.document = parser.Parse(snapshot.Data)
 	m.session = &sessionState{original: append([]byte(nil), snapshot.Data...)}
 	m.cursor = 0
+	m.loadErr = nil
+	return nil
 }
 
 // updateConfirmReload обрабатывает модальный экран подтверждения перезагрузки
 // (F5 при dirty): подтверждение перечитывает target, всё остальное (default
-// No, ТЗ §15) возвращает на таблицу без изменений.
+// No, ТЗ §15) возвращает на таблицу без изменений. reload_done пишется только
+// при успехе: при ошибке reloadFromDisk уже оставил в статусе load_error.
 func (m model) updateConfirmReload(msgKey string) (tea.Model, tea.Cmd) {
 	if i18n.AcceptYes(m.opts.Lang, msgKey) {
-		m.reloadFromDisk()
-		m.status = Tr(m.opts.Lang, "reload_done")
+		if err := m.reloadFromDisk(); err == nil {
+			m.status = Tr(m.opts.Lang, "reload_done")
+		}
 	}
 	m.screen = ScreenTable
 	return m, nil
