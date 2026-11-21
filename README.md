@@ -20,7 +20,7 @@
 - Реализованы secure snapshot/base-hash conflict, стабильные flock и низкоуровневый атомарный `Replace` с сохранением metadata/xattrs. Реализованы backup и ротация: `Create`, `Open`, `List`, `Select` и `Rotate` в `internal/backup`.
 - Реализована доменная transaction в `internal/transaction`: internal validation, lock, повторный base SHA-256, `findmnt` candidate check, backup текущей операции, atomic replace, post-check, один automatic rollback и ротация после полного успеха.
 - Реализован CLI на Cobra (`cmd/`, `main.go`): десять команд `list`, `add`, `edit`, `delete`, `comment`, `uncomment`, `validate`, `verify-mount`, `backup`, `rollback`; dry-run, подтверждения `[y/N]`, unified diff, селекторы записей с кодом неоднозначности 8 и форматы вывода `table`/`json`/`csv`/`tsv` со `schema_version: 1`. Тесты CLI работают только с временными файлами, fake runner и scripted stdin; реальный `/etc/fstab` и findmnt не затрагиваются.
-- **Ограничения текущего блока**: флаги `--log-level`, `--lang` и `--config` принимаются и валидируются, но logger, YAML-config loader и полные каталоги i18n RU/EN реализуются следующим блоком; текущие пользовательские сообщения — на русском. Обязательный structured logger в `validate`/`verify-mount` и команда `tui` пока не подключены.
+- Реализованы YAML-конфигурация с приоритетами и security-checks (`internal/config`), структурный JSON Lines-журнал с rotation и redaction (`internal/logger`) и локализация RU/EN (`internal/i18n`); оба пакета подключены к CLI: настройки резолвятся до handler'ов, журнал открывается до любой мутации и фиксирует исход операций. Команда `tui` остаётся будущим этапом.
 - Актуальная основа разработки: [ТЗ версии 2.0](../fstab-editor-v2.md).
 - Исходная редакция сохранена: [ТЗ версии 1.0](../fstab-editor.md).
 
@@ -55,7 +55,33 @@ go build -o fstab-edit .
 
 Подтверждение `[y/N]` (по умолчанию отказ) обязательно для мутаций и `rollback`: без TTY требуется `--yes`, при этом `--yes` не обходит ошибки валидации, неоднозначность селектора и внешние сбои. Интерактивный diff и warning-preview печатаются в stderr только в prompt-режиме: `--yes` пропускает prompt целиком и ничего не печатает, а diff и diagnostics остаются доступными в полях machine-JSON (`diff`, `diagnostics`). `--dry-run` показывает diff и diagnostics, ничего не меняя и не требуя `--yes`.
 
-Форматы вывода `--output=table|json|csv|tsv`; JSON — `schema_version: 1`. Обычные данные — stdout (ровно один structured document для machine-форматов), диагностика, diff и prompts — stderr. Exit codes: 0 успех (warnings допустимы), 1 validation, 2 usage, 3 **зарезервирован** (mapping недостатка прав и root-проверки реализуется следующим блоком; текущая версия этот код не генерирует), 4 lock/base conflict, 5 внешняя утилита, 6 I/O/backup/write, 7 критический rollback (наивысший приоритет), 8 неоднозначный селектор.
+Форматы вывода `--output=table|json|csv|tsv`; JSON — `schema_version: 1`. Обычные данные — stdout (ровно один structured document для machine-форматов), диагностика, diff и prompts — stderr. Exit codes: 0 успех (warnings допустимы), 1 validation, 2 usage, 3 недостаток прав (небезопасный config, недоступный журнал), 4 lock/base conflict, 5 внешняя утилита, 6 I/O/backup/write, 7 критический rollback (наивысший приоритет), 8 неоднозначный селектор.
+
+## Конфигурация
+
+Настройки резолвятся по приоритету ТЗ §13.1: **CLI-флаги > `FSTAB_EDIT_*` env > user YAML > system YAML > defaults**. CLI-флаг применяется только при явном `--flag` (Cobra `Changed`), иначе значение берётся из нижележащего уровня.
+
+- Пути автоматической загрузки: system — `/etc/fstab-edit/config.yaml` (требует root-ownership), user — `~/.config/fstab-edit/config.yaml`. Root-процесс (euid 0) user-config автоматически не загружает (ТЗ §13.2).
+- `--config <path>` задаёт явный YAML вместо system/user; env всё равно выше его.
+- Env-переменные: `FSTAB_EDIT_FILE`, `FSTAB_EDIT_BACKUP_DIR`, `FSTAB_EDIT_LOG_LEVEL`, `FSTAB_EDIT_LANG`, `FSTAB_EDIT_OUTPUT`. Неизвестные `FSTAB_EDIT_*` печатают `warning: ...` в stderr и игнорируются.
+- YAML-схема (ТЗ §13.3): `fstab_path`, `backup.dir|prefix|keep`, `log.file|level|max_size_mb|keep`, `tui.theme`. Язык и формат вывода из YAML не читаются (только env/CLI).
+- Security-checks (ТЗ §13.2): symlink-конфигурация отклоняется, файл не должен быть group/others-writable (иначе exit code 3), system-config обязан принадлежать root, user/explicit — effective UID. Некорректный YAML или значения — exit code 2.
+
+## Журналирование
+
+Файловый журнал — JSON Lines, по умолчанию `/var/log/fstab-edit.log` (права `0600`).
+
+- Событие — одна JSON-строка: `severity`, `timestamp` (RFC 3339 UTC), `real_uid`/`effective_uid`, `sudo_user`/`sudo_uid` (только при числовом `SUDO_UID`), `operation` (`add`, `edit`, `delete`, `comment`, `uncomment`, `backup`, `rollback`), `target`, `backup_id`, `result` (`success`/`error`/`cancelled`), `error_code`, `duration_ms`, `old_value`/`new_value`. Коды и поля не локализуются.
+- Журнал открывается **до** любой мутации (`add`/`edit`/`delete`/`comment`/`uncomment`/`rollback`/`backup`): недоступный журнал блокирует изменение target кодом 3 (нет прав) или 6 (прочий I/O) — backup/lock/write не начинаются. Сбой записи после успешного replace игнорируется и не мешает обязательному rollback.
+- Read-only команды (`list`, `validate`, `verify-mount`) и `--dry-run` файловый журнал не создают вовсе.
+- Rotation: при превышении `log.max_size_mb` (default 10 MiB) текущий файл уходит в `<file>.1`, архивы сдвигаются до `log.keep` (default 5).
+- Redaction: `old_value`/`new_value` (изменённые строки diff) проходят маскировку секретов — `password=`, `credentials=`, `token=`, userinfo URL и др. заменяются на `***`.
+
+## Локализация
+
+Язык сообщений выбирается по приоритету ТЗ §15: `--lang` > `FSTAB_EDIT_LANG` > `LC_ALL` > `LANG` > русский (default). Поддерживаются `ru` и `en`; переводятся help-тексты, usage флагов, диагностика ошибок и prompt-подтверждения. Формы ответа «да»: ru — `д`, `да`, `y`, `yes`; en — `y`, `yes`; любой иной ответ и пустая строка — отказ (default No).
+
+Ограничения перевода: доменные диагностики валидатора (`models.Diagnostic.Message` — русские строки нижележащего слоя) и Cause-цепочки ошибок нижних уровней не переводятся; системные сообщения Cobra о неизвестном флаге (unknown flag) выводятся как есть.
 
 Примеры:
 
@@ -155,7 +181,7 @@ golangci-lint run
 4. Post-write warnings допустимы; errors вызывают ровно одну попытку restore backup именно текущей transaction. `Replaced=false` никогда не вызывает rollback.
 5. Успешный rollback возвращает primary error с `RolledBack=true`. Rollback failure возвращает класс `rollback`, сохраняет primary и rollback causes и recovery paths target/backup/metadata.
 6. Rotation выполняется только после полного успешного post-check; backup текущей transaction передаётся protected. Ошибка rotation возвращает класс `rotation_after_success`, но не откатывает уже успешно записанный target.
-7. CLI, prompt, diff rendering, dry-run и manual rollback подключены в `cmd/` и `main.go`; обязательный logger/config остаётся следующим блоком; transaction возвращает typed `FailureKind`, который CLI отображает на стабильные exit codes.
+7. CLI, prompt, diff rendering, dry-run и manual rollback подключены в `cmd/` и `main.go`; config/logger/i18n подключены к pipeline CLI: настройки резолвятся в `PersistentPreRunE`, журнал открывается до мутации и фиксирует исход операций с redaction секретов. Transaction возвращает typed `FailureKind`, который CLI отображает на стабильные exit codes.
 
 ## Резервные копии и ротация
 

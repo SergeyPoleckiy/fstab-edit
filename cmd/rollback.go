@@ -11,6 +11,7 @@ import (
 
 	"fstab-edit/internal/cliapp"
 	"fstab-edit/internal/i18n"
+	"fstab-edit/internal/logger"
 	"fstab-edit/internal/output"
 )
 
@@ -51,6 +52,7 @@ func (a *App) executeRollback(restoreID string) error {
 	request := cliapp.RollbackRequest{
 		RestoreID: restoreID,
 		Directory: a.flags.backupDir,
+		Prefix:    a.settings.BackupPrefix,
 	}
 	// Первый проход всегда read-only: он выбирает и проверяет копию и
 	// строит diff для подтверждения, но не создаёт safety backup и не
@@ -70,14 +72,39 @@ func (a *App) executeRollback(restoreID string) error {
 		return exitErr
 	}
 	if !proceed {
+		a.logEvent(logger.Event{
+			Severity:  logger.SeverityInfo,
+			Operation: logger.OperationRollback,
+			Target:    target,
+			Result:    logger.ResultCancelled,
+		})
 		a.writeStderr(i18n.T(a.lang, "status.rollback_cancelled") + "\n")
 		return nil
 	}
+	start := a.options.Now()
 	result, exitErr := a.service.Rollback(contextForHandlers(), target, request)
+	duration := a.options.Now().Sub(start)
 	a.renderRollback(result, target)
 	if exitErr != nil {
+		a.logEvent(logger.Event{
+			Severity:   logger.SeverityError,
+			Operation:  logger.OperationRollback,
+			Target:     target,
+			BackupID:   result.Selected.ID,
+			Result:     logger.ResultError,
+			ErrorCode:  exitErr.Code,
+			DurationMs: duration.Milliseconds(),
+		})
 		return exitErr
 	}
+	a.logEvent(logger.Event{
+		Severity:   logger.SeverityInfo,
+		Operation:  logger.OperationRollback,
+		Target:     target,
+		BackupID:   result.Selected.ID,
+		Result:     logger.ResultSuccess,
+		DurationMs: duration.Milliseconds(),
+	})
 	return nil
 }
 

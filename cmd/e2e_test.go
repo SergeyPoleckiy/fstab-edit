@@ -118,7 +118,7 @@ func listBackupData(t *testing.T, directory string) []string {
 func TestAddDryRunLeavesFileUnchanged(t *testing.T) {
 	target := writeTempTarget(t, e2eFixture)
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app := newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 
 	code := app.Execute([]string{
 		"add", "--file", target,
@@ -155,7 +155,7 @@ func TestAddNonTTYRequiresYesAndCreatesBackup(t *testing.T) {
 	}
 
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app := newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 	if code := app.Execute(args); code != 2 {
 		t.Fatalf("code = %d, want 2; stderr: %s", code, buffers.stderr.String())
 	}
@@ -167,7 +167,7 @@ func TestAddNonTTYRequiresYesAndCreatesBackup(t *testing.T) {
 	}
 
 	buffers = &appBuffers{}
-	app = newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app = newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 	if code := app.Execute(append(args, "--yes")); code != 0 {
 		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
 	}
@@ -198,7 +198,7 @@ func TestAddTTYConfirmationDeclineAndAccept(t *testing.T) {
 
 	declined := writeTempTarget(t, e2eFixture)
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader("n\n"), true, &fakeRunner{})
+	app := newApp(t, buffers, strings.NewReader("n\n"), true, &fakeRunner{})
 	if code := app.Execute(buildArgs(declined)); code != 0 {
 		t.Fatalf("decline code = %d, want 0; stderr: %s", code, buffers.stderr.String())
 	}
@@ -211,7 +211,7 @@ func TestAddTTYConfirmationDeclineAndAccept(t *testing.T) {
 
 	eofTarget := writeTempTarget(t, e2eFixture)
 	buffers = &appBuffers{}
-	app = newApp(buffers, strings.NewReader(""), true, &fakeRunner{})
+	app = newApp(t, buffers, strings.NewReader(""), true, &fakeRunner{})
 	if code := app.Execute(buildArgs(eofTarget)); code != 0 {
 		t.Fatalf("EOF code = %d, want 0", code)
 	}
@@ -221,7 +221,7 @@ func TestAddTTYConfirmationDeclineAndAccept(t *testing.T) {
 
 	accepted := writeTempTarget(t, e2eFixture)
 	buffers = &appBuffers{}
-	app = newApp(buffers, strings.NewReader("y\n"), true, &fakeRunner{})
+	app = newApp(t, buffers, strings.NewReader("y\n"), true, &fakeRunner{})
 	if code := app.Execute(buildArgs(accepted)); code != 0 {
 		t.Fatalf("accept code = %d, want 0; stderr: %s", code, buffers.stderr.String())
 	}
@@ -235,7 +235,7 @@ func TestAddTTYConfirmationDeclineAndAccept(t *testing.T) {
 func TestEditMutatesOnlySelectedFields(t *testing.T) {
 	target := writeTempTarget(t, e2eFixture)
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app := newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 
 	code := app.Execute([]string{
 		"edit", "--file", target, "--mount-point", "/mnt/data",
@@ -258,7 +258,7 @@ func TestEditMutatesOnlySelectedFields(t *testing.T) {
 func TestEditNoChangingFlagRejected(t *testing.T) {
 	target := writeTempTarget(t, e2eFixture)
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app := newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 
 	code := app.Execute([]string{"edit", "--file", target, "--mount-point", "/mnt/data", "--yes"})
 	if code != 2 {
@@ -274,7 +274,7 @@ func TestEditNoChangingFlagRejected(t *testing.T) {
 func TestDeleteCommentUncommentSelectors(t *testing.T) {
 	target := writeTempTarget(t, e2eFixture)
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app := newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 
 	if code := app.Execute([]string{"delete", "--file", target, "--line", "6", "--yes"}); code != 0 {
 		t.Fatalf("delete code = %d, want 0; stderr: %s", code, buffers.stderr.String())
@@ -284,7 +284,7 @@ func TestDeleteCommentUncommentSelectors(t *testing.T) {
 	}
 
 	buffers = &appBuffers{}
-	app = newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app = newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 	if code := app.Execute([]string{"comment", "--file", target, "/mnt/data", "--yes"}); code != 0 {
 		t.Fatalf("comment code = %d, want 0; stderr: %s", code, buffers.stderr.String())
 	}
@@ -293,7 +293,7 @@ func TestDeleteCommentUncommentSelectors(t *testing.T) {
 	}
 
 	buffers = &appBuffers{}
-	app = newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app = newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 	if code := app.Execute([]string{"uncomment", "--file", target, "--line", "4", "--yes"}); code != 0 {
 		t.Fatalf("uncomment code = %d, want 0; stderr: %s", code, buffers.stderr.String())
 	}
@@ -312,7 +312,7 @@ func TestAmbiguousSelectorReturnsCode8(t *testing.T) {
 
 	target := writeTempTarget(t, ambiguousFixture)
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app := newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 	if code := app.Execute(buildArgs(target)); code != 8 {
 		t.Fatalf("code = %d, want 8; stderr: %s", code, buffers.stderr.String())
 	}
@@ -323,7 +323,7 @@ func TestAmbiguousSelectorReturnsCode8(t *testing.T) {
 	}
 
 	buffers = &appBuffers{}
-	app = newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app = newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 	if code := app.Execute(buildArgs(target, "--yes")); code != 8 {
 		t.Fatalf("code with --yes = %d, want 8; stderr: %s", code, buffers.stderr.String())
 	}
@@ -338,14 +338,15 @@ func TestAmbiguousSelectorInteractiveChoice(t *testing.T) {
 	target := writeTempTarget(t, ambiguousFixture)
 	buffers := &appBuffers{}
 	app := cmd.NewApp(cmd.AppOptions{
-		Stdout:  &buffers.stdout,
-		Stderr:  &buffers.stderr,
-		Stdin:   strings.NewReader(""),
-		TTY:     func() bool { return true },
-		Runner:  &fakeRunner{},
-		Chooser: fixedChooser{line: 2},
-		Getenv:  func(string) string { return "" },
-		Environ: func() []string { return nil },
+		Stdout:            &buffers.stdout,
+		Stderr:            &buffers.stderr,
+		Stdin:             strings.NewReader(""),
+		TTY:               func() bool { return true },
+		Runner:            &fakeRunner{},
+		Chooser:           fixedChooser{line: 2},
+		Getenv:            func(string) string { return "" },
+		Environ:           func() []string { return nil },
+		DefaultConfigPath: testLogConfig(t),
 	})
 
 	code := app.Execute([]string{
@@ -358,14 +359,15 @@ func TestAmbiguousSelectorInteractiveChoice(t *testing.T) {
 	// Без --yes при TTY chooser получает список кандидатов и выбирает строку 2.
 	buffers = &appBuffers{}
 	app = cmd.NewApp(cmd.AppOptions{
-		Stdout:  &buffers.stdout,
-		Stderr:  &buffers.stderr,
-		Stdin:   strings.NewReader("y\n"),
-		TTY:     func() bool { return true },
-		Runner:  &fakeRunner{},
-		Chooser: fixedChooser{line: 2},
-		Getenv:  func(string) string { return "" },
-		Environ: func() []string { return nil },
+		Stdout:            &buffers.stdout,
+		Stderr:            &buffers.stderr,
+		Stdin:             strings.NewReader("y\n"),
+		TTY:               func() bool { return true },
+		Runner:            &fakeRunner{},
+		Chooser:           fixedChooser{line: 2},
+		Getenv:            func(string) string { return "" },
+		Environ:           func() []string { return nil },
+		DefaultConfigPath: testLogConfig(t),
 	})
 	code = app.Execute([]string{
 		"edit", "--file", target, "--mount-point", "/mnt/dup", "--options", "defaults",
@@ -391,7 +393,7 @@ func TestValidateOfflineWarningsAndErrors(t *testing.T) {
 	target := writeTempTarget(t, e2eFixture)
 	runner := &fakeRunner{}
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, runner)
+	app := newApp(t, buffers, strings.NewReader(""), false, runner)
 
 	if code := app.Execute([]string{"validate", "--file", target, "--offline", "-o", "json"}); code != 0 {
 		t.Fatalf("warnings code = %d, want 0; stderr: %s", code, buffers.stderr.String())
@@ -412,7 +414,7 @@ func TestValidateOfflineWarningsAndErrors(t *testing.T) {
 
 	invalid := writeTempTarget(t, invalidFixture)
 	buffers = &appBuffers{}
-	app = newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app = newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 	if code := app.Execute([]string{"validate", "--file", invalid, "--offline"}); code != 1 {
 		t.Fatalf("invalid code = %d, want 1; stderr: %s", code, buffers.stderr.String())
 	}
@@ -424,7 +426,7 @@ func TestVerifyMountFindmntArgv(t *testing.T) {
 	target := writeTempTarget(t, e2eFixture)
 	runner := &fakeRunner{}
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, runner)
+	app := newApp(t, buffers, strings.NewReader(""), false, runner)
 
 	if code := app.Execute([]string{"verify-mount", "--file", target}); code != 0 {
 		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
@@ -445,7 +447,7 @@ func TestBackupCreatesFilesAndDryRunIsPure(t *testing.T) {
 	target := writeTempTarget(t, e2eFixture)
 	directory := t.TempDir()
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app := newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 
 	if code := app.Execute([]string{"backup", "--file", target, "--backup-dir", directory, "-o", "json"}); code != 0 {
 		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
@@ -470,7 +472,7 @@ func TestBackupCreatesFilesAndDryRunIsPure(t *testing.T) {
 	}
 
 	buffers = &appBuffers{}
-	app = newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app = newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 	if code := app.Execute([]string{"backup", "--file", target, "--backup-dir", directory, "--dry-run", "-o", "json"}); code != 0 {
 		t.Fatalf("dry-run code = %d, want 0", code)
 	}
@@ -487,7 +489,7 @@ func TestRollbackDryRunAndRealRestore(t *testing.T) {
 	directory := t.TempDir()
 
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app := newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 	if code := app.Execute([]string{"backup", "--file", target, "--backup-dir", directory, "-o", "json"}); code != 0 {
 		t.Fatalf("backup code = %d, want 0", code)
 	}
@@ -505,7 +507,7 @@ func TestRollbackDryRunAndRealRestore(t *testing.T) {
 
 	// Dry-run оставляет target и не создаёт safety backup.
 	buffers = &appBuffers{}
-	app = newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app = newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 	if code := app.Execute([]string{
 		"rollback", "--file", target, "--backup-dir", directory,
 		"--restore", backupDoc.BackupID, "--dry-run", "-o", "json",
@@ -521,7 +523,7 @@ func TestRollbackDryRunAndRealRestore(t *testing.T) {
 
 	// Non-TTY без --yes требует подтверждения.
 	buffers = &appBuffers{}
-	app = newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app = newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 	if code := app.Execute([]string{
 		"rollback", "--file", target, "--backup-dir", directory, "--restore", backupDoc.BackupID,
 	}); code != 2 {
@@ -530,7 +532,7 @@ func TestRollbackDryRunAndRealRestore(t *testing.T) {
 
 	// TTY с ответом «y» восстанавливает байты и создаёт safety backup.
 	buffers = &appBuffers{}
-	app = newApp(buffers, strings.NewReader("y\n"), true, &fakeRunner{})
+	app = newApp(t, buffers, strings.NewReader("y\n"), true, &fakeRunner{})
 	if code := app.Execute([]string{
 		"rollback", "--file", target, "--backup-dir", directory, "--restore", backupDoc.BackupID, "-o", "json",
 	}); code != 0 {
@@ -586,7 +588,7 @@ func TestUsageErrorsForMutations(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			buffers := &appBuffers{}
-			app := newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+			app := newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 			if code := app.Execute(testCase.args); code != 2 {
 				t.Fatalf("code = %d, want 2; stderr: %s", code, buffers.stderr.String())
 			}
@@ -606,7 +608,7 @@ func TestUsageErrorsForMutations(t *testing.T) {
 func TestMachineStdoutExcludesPromptsAndDiff(t *testing.T) {
 	target := writeTempTarget(t, e2eFixture)
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader("y\n"), true, &fakeRunner{})
+	app := newApp(t, buffers, strings.NewReader("y\n"), true, &fakeRunner{})
 
 	code := app.Execute([]string{
 		"add", "--file", target, "--device", "/dev/sdd1", "--mount", "/mnt/new",
@@ -653,8 +655,9 @@ func TestExitMappingIntegration(t *testing.T) {
 				Runner: &fakeRunner{},
 				// Getenv/Environ инъектируют пустое окружение: default
 				// язык детерминированно "ru" независимо от LANG машины.
-				Getenv:  func(string) string { return "" },
-				Environ: func() []string { return nil },
+				Getenv:            func(string) string { return "" },
+				Environ:           func() []string { return nil },
+				DefaultConfigPath: testLogConfig(t),
 				Dependencies: &cliapp.Dependencies{
 					ExecuteTransaction: func(_ context.Context, _ transaction.Plan, _ transaction.Options) (transaction.TransactionResult, error) {
 						return transaction.TransactionResult{
@@ -730,9 +733,10 @@ func TestMutationPreviewValidationErrorBlocksTransaction(t *testing.T) {
 		Runner: &fakeRunner{},
 		// Getenv/Environ инъектируют пустое окружение: default язык
 		// детерминированно "ru" независимо от LANG машины.
-		Getenv:       func(string) string { return "" },
-		Environ:      func() []string { return nil },
-		Dependencies: probe.dependencies(true),
+		Getenv:            func(string) string { return "" },
+		Environ:           func() []string { return nil },
+		DefaultConfigPath: testLogConfig(t),
+		Dependencies:      probe.dependencies(true),
 	})
 
 	// /mnt/data уже существует в fixture: валидатор кандидата выдаёт
@@ -777,9 +781,10 @@ func TestNoOpEditSkipsTransactionAndBackup(t *testing.T) {
 		Runner: &fakeRunner{},
 		// Getenv/Environ инъектируют пустое окружение: default язык
 		// детерминированно "ru" независимо от LANG машины.
-		Getenv:       func(string) string { return "" },
-		Environ:      func() []string { return nil },
-		Dependencies: probe.dependencies(true),
+		Getenv:            func(string) string { return "" },
+		Environ:           func() []string { return nil },
+		DefaultConfigPath: testLogConfig(t),
+		Dependencies:      probe.dependencies(true),
 	})
 
 	// --yes задан сознательно: no-op не должен требовать подтверждения и не

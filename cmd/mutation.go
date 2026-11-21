@@ -8,12 +8,16 @@ package cmd
 
 import (
 	"errors"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"fstab-edit/internal/backup"
 	"fstab-edit/internal/cliapp"
 	"fstab-edit/internal/editor"
 	"fstab-edit/internal/i18n"
+	"fstab-edit/internal/logger"
 	"fstab-edit/internal/output"
 	"fstab-edit/internal/transaction"
 )
@@ -259,22 +263,105 @@ func (a *App) finishMutation(target string, preview *cliapp.MutationPreview) err
 		return exitErr
 	}
 	if !proceed {
+		// Отмена пользователем — штатный исход: severity info, code 0,
+		// backup_id не назначен, target не тронут.
+		a.logEvent(logger.Event{
+			Severity:  logger.SeverityInfo,
+			Operation: operationFor(preview.Operation),
+			Target:    target,
+			Result:    logger.ResultCancelled,
+		})
 		a.writeStderr(i18n.T(a.lang, "status.cancelled") + "\n")
 		return nil
 	}
+	start := a.options.Now()
 	executed, runErr := a.service.RunMutation(contextForHandlers(), target, *preview,
-		transaction.Options{Runner: a.options.Runner})
+		transaction.Options{
+			Runner:          a.options.Runner,
+			BackupDirectory: a.flags.backupDir,
+			BackupPrefix:    a.settings.BackupPrefix,
+			RotationKeep:    a.settings.BackupKeep,
+		})
+	duration := a.options.Now().Sub(start)
 	a.renderMutation(preview, target, &executed)
 	if runErr != nil {
 		// Код ошибки транзакции имеет приоритет над прочими диагностиками:
 		// critical rollback failure (7) никогда не перекрывается результатом.
 		var mutationErr *cliapp.ExitError
 		if errors.As(runErr, &mutationErr) {
+			a.logMutationEvent(target, preview, executed, mutationErr.Code, duration)
 			return mutationErr
 		}
+		a.logMutationEvent(target, preview, executed, cliapp.ExitIO, duration)
 		return ioError("error.io.save_changes", "сохранить изменения %s", target, runErr)
 	}
+	a.logMutationEvent(target, preview, executed, 0, duration)
 	return nil
+}
+
+// logMutationEvent фиксирует исход мутации в журнале (ТЗ §14): operation из
+// preview, backup_id созданной копии, result success/error, error code и
+// изменённые diff-строки с redaction секретов. Ошибка записи не заменяет
+// первичную: журнал не должен мешать rollback после успешного replace.
+func (a *App) logMutationEvent(target string, preview *cliapp.MutationPreview,
+	executed transaction.TransactionResult, errorCode int, duration time.Duration,
+) {
+	event := logger.Event{
+		Severity:   logger.SeverityInfo,
+		Operation:  operationFor(preview.Operation),
+		Target:     target,
+		BackupID:   executed.Backup.ID,
+		Result:     logger.ResultSuccess,
+		DurationMs: duration.Milliseconds(),
+	}
+	if errorCode != 0 {
+		event.Severity = logger.SeverityError
+		event.Result = logger.ResultError
+		event.ErrorCode = errorCode
+	}
+	oldValue, newValue := diffChangedLines(preview.Diff)
+	event.OldValue = logger.Redact(oldValue)
+	event.NewValue = logger.Redact(newValue)
+	a.logEvent(event)
+}
+
+// operationFor маппит backup.Operation preview (before_add, before_edit, …)
+// на стабильный код операции журнала (add, edit, …). Неизвестная операция
+// оставляет код пустым: журнал не должен выдумывать значение.
+func operationFor(operation backup.Operation) logger.Operation {
+	switch operation {
+	case backup.OperationBeforeAdd:
+		return logger.OperationAdd
+	case backup.OperationBeforeEdit:
+		return logger.OperationEdit
+	case backup.OperationBeforeDelete:
+		return logger.OperationDelete
+	case backup.OperationBeforeComment:
+		return logger.OperationComment
+	case backup.OperationBeforeUncomment:
+		return logger.OperationUncomment
+	}
+	return ""
+}
+
+// diffChangedLines извлекает из unified diff изменённые строки: '-'-строки
+// (кроме заголовка '---') собираются в old, '+'-строки (кроме заголовка
+// '+++') — в new; каждый список объединяется через "\n". Контекст, hunk
+// заголовки и служебные строки игнорируются.
+func diffChangedLines(diffText string) (old, new string) {
+	oldLines := make([]string, 0)
+	newLines := make([]string, 0)
+	for _, line := range strings.Split(diffText, "\n") {
+		switch {
+		case strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++"):
+			continue
+		case strings.HasPrefix(line, "-"):
+			oldLines = append(oldLines, line[1:])
+		case strings.HasPrefix(line, "+"):
+			newLines = append(newLines, line[1:])
+		}
+	}
+	return strings.Join(oldLines, "\n"), strings.Join(newLines, "\n")
 }
 
 // renderMutation публикует structured результат мутации на stdout одним

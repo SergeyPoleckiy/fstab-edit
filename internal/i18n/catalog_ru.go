@@ -52,12 +52,16 @@ var catalogRU = map[string]string{
 	"chooser.ambiguous_header":     "селектор неоднозначен, выберите строку:",
 	"chooser.line_prompt":          "номер строки: ",
 
+	// --- Ключи cmd config/logger wiring (Task 6) ---
+	"config.security": "конфигурация %s отклонена проверкой безопасности",
+	"config.invalid":  "конфигурация %s некорректна",
+	"error.log.open":  "открыть журнал %s",
+
 	// --- Ключи cmd help (Task 5): Short/Long команд и usage флагов ---
 	// RU-значения дословно повторяют текущие строки cmd; EN — перевод.
 	// Имена флагов и enum-значения (table, json, csv, tsv, debug, ...) в
 	// usage не переводятся.
-	"help.root.short":             "безопасное редактирование fstab с валидацией, backup и rollback",
-	"help.cmd.add.short":          "добавить новую запись fstab",
+	"help.root.short": "безопасное редактирование fstab с валидацией, backup и rollback", "help.cmd.add.short": "добавить новую запись fstab",
 	"help.cmd.edit.short":         "изменить выбранные поля записи fstab",
 	"help.cmd.delete.short":       "удалить запись fstab",
 	"help.cmd.comment.short":      "закомментировать активную запись fstab",

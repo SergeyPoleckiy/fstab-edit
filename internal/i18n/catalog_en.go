@@ -52,6 +52,11 @@ var catalogEN = map[string]string{
 	"chooser.ambiguous_header":     "selector is ambiguous, choose a line:",
 	"chooser.line_prompt":          "line number: ",
 
+	// --- Ключи cmd config/logger wiring (Task 6) ---
+	"config.security": "configuration %s rejected by security check",
+	"config.invalid":  "configuration %s is invalid",
+	"error.log.open":  "open log file %s",
+
 	// --- Ключи cmd help (Task 5): Short/Long команд и usage флагов ---
 	// EN-значения — перевод RU-каталога; ключи и порядок зеркальны catalogRU.
 	"help.root.short":             "safe fstab editing with validation, backup and rollback",

@@ -51,16 +51,18 @@ type appBuffers struct {
 // newApp создаёт App с заданным stdin/TTY и fake runner. Все writers —
 // memory buffers, поэтому тесты не касаются реальных потоков процесса.
 // Getenv/Environ инъектируют пустое окружение: default язык детерминированно
-// "ru" независимо от LANG/LC_ALL машины прогона тестов.
-func newApp(buffers *appBuffers, stdin io.Reader, tty bool, runner *fakeRunner) *cmd.App {
+// "ru" независимо от LANG/LC_ALL машины прогона тестов. DefaultConfigPath
+// направляет журнал mutating-команд в tempdir: тесты не касаются /var/log.
+func newApp(t *testing.T, buffers *appBuffers, stdin io.Reader, tty bool, runner *fakeRunner) *cmd.App {
 	return cmd.NewApp(cmd.AppOptions{
-		Stdout:  &buffers.stdout,
-		Stderr:  &buffers.stderr,
-		Stdin:   stdin,
-		TTY:     func() bool { return tty },
-		Runner:  runner,
-		Getenv:  func(string) string { return "" },
-		Environ: func() []string { return nil },
+		Stdout:            &buffers.stdout,
+		Stderr:            &buffers.stderr,
+		Stdin:             stdin,
+		TTY:               func() bool { return tty },
+		Runner:            runner,
+		Getenv:            func(string) string { return "" },
+		Environ:           func() []string { return nil },
+		DefaultConfigPath: testLogConfig(t),
 	})
 }
 
@@ -90,7 +92,7 @@ const listFixture = `# заголовок документа
 func TestAppHelpDoesNotAccessTarget(t *testing.T) {
 	runner := &fakeRunner{}
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, runner)
+	app := newApp(t, buffers, strings.NewReader(""), false, runner)
 
 	if code := app.Execute([]string{"--help"}); code != 0 {
 		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
@@ -104,7 +106,7 @@ func TestAppHelpDoesNotAccessTarget(t *testing.T) {
 	}
 
 	buffers = &appBuffers{}
-	app = newApp(buffers, strings.NewReader(""), false, runner)
+	app = newApp(t, buffers, strings.NewReader(""), false, runner)
 	if code := app.Execute([]string{"list", "--help"}); code != 0 {
 		t.Fatalf("list --help code = %d, want 0", code)
 	}
@@ -121,7 +123,7 @@ func TestAppHelpDoesNotAccessTarget(t *testing.T) {
 func TestAppVersionDoesNotAccessTarget(t *testing.T) {
 	runner := &fakeRunner{}
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, runner)
+	app := newApp(t, buffers, strings.NewReader(""), false, runner)
 
 	if code := app.Execute([]string{"--version"}); code != 0 {
 		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
@@ -153,7 +155,7 @@ func TestAppGlobalFlagValidation(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			runner := &fakeRunner{}
 			buffers := &appBuffers{}
-			app := newApp(buffers, strings.NewReader(""), false, runner)
+			app := newApp(t, buffers, strings.NewReader(""), false, runner)
 			if code := app.Execute(testCase.args); code != 2 {
 				t.Fatalf("code = %d, want 2; stderr: %s", code, buffers.stderr.String())
 			}
@@ -173,7 +175,7 @@ func TestListJSONSchema(t *testing.T) {
 	target := writeTempTarget(t, listFixture)
 	runner := &fakeRunner{}
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, runner)
+	app := newApp(t, buffers, strings.NewReader(""), false, runner)
 
 	if code := app.Execute([]string{"list", "--file", target, "-o", "json"}); code != 0 {
 		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
@@ -220,7 +222,7 @@ func TestListJSONSchema(t *testing.T) {
 func TestListTableOutput(t *testing.T) {
 	target := writeTempTarget(t, listFixture)
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app := newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 
 	if code := app.Execute([]string{"list", "--file", target}); code != 0 {
 		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
@@ -238,7 +240,7 @@ func TestListTableOutput(t *testing.T) {
 func TestListQuietSuppressesStdout(t *testing.T) {
 	target := writeTempTarget(t, listFixture)
 	buffers := &appBuffers{}
-	app := newApp(buffers, strings.NewReader(""), false, &fakeRunner{})
+	app := newApp(t, buffers, strings.NewReader(""), false, &fakeRunner{})
 
 	if code := app.Execute([]string{"list", "--file", target, "--quiet"}); code != 0 {
 		t.Fatalf("code = %d, want 0", code)

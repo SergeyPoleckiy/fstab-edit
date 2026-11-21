@@ -18,17 +18,19 @@ import (
 // newAppI18n собирает App с инъектируемым окружением: Getenv/Environ
 // подменяют os.Getenv/os.Environ в резолве языка, поэтому тест контролирует
 // резолв полностью (пустое окружение = default "ru" без влияния LANG машины).
-func newAppI18n(buffers *appBuffers, stdin io.Reader, tty bool, runner *fakeRunner,
+// DefaultConfigPath направляет журнал mutating-команд в tempdir.
+func newAppI18n(t *testing.T, buffers *appBuffers, stdin io.Reader, tty bool, runner *fakeRunner,
 	getenv func(string) string, environ func() []string,
 ) *cmd.App {
 	return cmd.NewApp(cmd.AppOptions{
-		Stdout:  &buffers.stdout,
-		Stderr:  &buffers.stderr,
-		Stdin:   stdin,
-		TTY:     func() bool { return tty },
-		Runner:  runner,
-		Getenv:  getenv,
-		Environ: environ,
+		Stdout:            &buffers.stdout,
+		Stderr:            &buffers.stderr,
+		Stdin:             stdin,
+		TTY:               func() bool { return tty },
+		Runner:            runner,
+		Getenv:            getenv,
+		Environ:           environ,
+		DefaultConfigPath: testLogConfig(t),
 	})
 }
 
@@ -42,7 +44,7 @@ func emptyEnv() (func(string) string, func() []string) {
 func TestHelpLocalized(t *testing.T) {
 	buffers := &appBuffers{}
 	getenv, environ := emptyEnv()
-	app := newAppI18n(buffers, strings.NewReader(""), false, &fakeRunner{}, getenv, environ)
+	app := newAppI18n(t, buffers, strings.NewReader(""), false, &fakeRunner{}, getenv, environ)
 
 	if code := app.Execute([]string{"--lang", "en", "--help"}); code != 0 {
 		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
@@ -61,7 +63,7 @@ func TestHelpLocalized(t *testing.T) {
 func TestHelpDefaultRussian(t *testing.T) {
 	buffers := &appBuffers{}
 	getenv, environ := emptyEnv()
-	app := newAppI18n(buffers, strings.NewReader(""), false, &fakeRunner{}, getenv, environ)
+	app := newAppI18n(t, buffers, strings.NewReader(""), false, &fakeRunner{}, getenv, environ)
 
 	if code := app.Execute([]string{"--help"}); code != 0 {
 		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
@@ -77,7 +79,7 @@ func TestErrorMessageLocalized(t *testing.T) {
 	missing := t.TempDir() + "/no-such-fstab"
 	buffers := &appBuffers{}
 	getenv, environ := emptyEnv()
-	app := newAppI18n(buffers, strings.NewReader(""), false, &fakeRunner{}, getenv, environ)
+	app := newAppI18n(t, buffers, strings.NewReader(""), false, &fakeRunner{}, getenv, environ)
 
 	code := app.Execute([]string{"list", "--lang", "en", "--file", missing})
 	if code != 6 {
@@ -108,7 +110,7 @@ func TestConfirmLocalizedYes(t *testing.T) {
 	russian := writeTempTarget(t, e2eFixture)
 	buffers := &appBuffers{}
 	getenv, environ := emptyEnv()
-	app := newAppI18n(buffers, strings.NewReader("да\n"), true, &fakeRunner{}, getenv, environ)
+	app := newAppI18n(t, buffers, strings.NewReader("да\n"), true, &fakeRunner{}, getenv, environ)
 	if code := app.Execute(buildArgs(russian)); code != 0 {
 		t.Fatalf("ru accept code = %d, want 0; stderr: %s", code, buffers.stderr.String())
 	}
@@ -120,7 +122,7 @@ func TestConfirmLocalizedYes(t *testing.T) {
 	english := writeTempTarget(t, e2eFixture)
 	buffers = &appBuffers{}
 	getenv, environ = emptyEnv()
-	app = newAppI18n(buffers, strings.NewReader("y\n"), true, &fakeRunner{}, getenv, environ)
+	app = newAppI18n(t, buffers, strings.NewReader("y\n"), true, &fakeRunner{}, getenv, environ)
 	if code := app.Execute(buildArgs(english, "--lang", "en")); code != 0 {
 		t.Fatalf("en accept code = %d, want 0; stderr: %s", code, buffers.stderr.String())
 	}
@@ -132,7 +134,7 @@ func TestConfirmLocalizedYes(t *testing.T) {
 	declined := writeTempTarget(t, e2eFixture)
 	buffers = &appBuffers{}
 	getenv, environ = emptyEnv()
-	app = newAppI18n(buffers, strings.NewReader("\n"), true, &fakeRunner{}, getenv, environ)
+	app = newAppI18n(t, buffers, strings.NewReader("\n"), true, &fakeRunner{}, getenv, environ)
 	if code := app.Execute(buildArgs(declined)); code != 0 {
 		t.Fatalf("decline code = %d, want 0; stderr: %s", code, buffers.stderr.String())
 	}
@@ -146,7 +148,7 @@ func TestConfirmLocalizedYes(t *testing.T) {
 func TestFlagUsageLocalized(t *testing.T) {
 	buffers := &appBuffers{}
 	getenv, environ := emptyEnv()
-	app := newAppI18n(buffers, strings.NewReader(""), false, &fakeRunner{}, getenv, environ)
+	app := newAppI18n(t, buffers, strings.NewReader(""), false, &fakeRunner{}, getenv, environ)
 
 	if code := app.Execute([]string{"--lang", "en", "--help"}); code != 0 {
 		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
@@ -166,7 +168,7 @@ func TestLangEnvResolution(t *testing.T) {
 	buffers := &appBuffers{}
 	getenv := func(name string) string { return "" }
 	environ := func() []string { return []string{"FSTAB_EDIT_LANG=en"} }
-	app := newAppI18n(buffers, strings.NewReader(""), false, &fakeRunner{}, getenv, environ)
+	app := newAppI18n(t, buffers, strings.NewReader(""), false, &fakeRunner{}, getenv, environ)
 
 	if code := app.Execute([]string{"--help"}); code != 0 {
 		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
@@ -181,7 +183,7 @@ func TestLangEnvResolution(t *testing.T) {
 func TestLangEqualsForm(t *testing.T) {
 	buffers := &appBuffers{}
 	getenv, environ := emptyEnv()
-	app := newAppI18n(buffers, strings.NewReader(""), false, &fakeRunner{}, getenv, environ)
+	app := newAppI18n(t, buffers, strings.NewReader(""), false, &fakeRunner{}, getenv, environ)
 
 	if code := app.Execute([]string{"--lang=ru", "--lang=en", "--help"}); code != 0 {
 		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())

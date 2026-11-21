@@ -14,13 +14,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"fstab-edit/internal/cliapp"
+	"fstab-edit/internal/config"
 	"fstab-edit/internal/i18n"
+	"fstab-edit/internal/logger"
 	"fstab-edit/internal/output"
 	"fstab-edit/internal/parser"
 	"fstab-edit/internal/sysutil"
@@ -66,13 +70,27 @@ type AppOptions struct {
 	Chooser cliapp.Chooser
 	// Dependencies перекрывает выбранные production-зависимости Service.
 	Dependencies *cliapp.Dependencies
-	// Getenv читает переменные окружения при резолве языка (LC_ALL, LANG);
+	// Getenv читает переменные окружения при резолве языка (LC_ALL, LANG),
+	// sudo-контекста журнала (SUDO_USER, SUDO_UID) и значений config;
 	// nil — production os.Getenv. Тесты подменяют для детерминированного
 	// выбора языка независимо от локали машины прогона.
 	Getenv func(string) string
-	// Environ возвращает окружение при резолве языка (FSTAB_EDIT_LANG);
-	// nil — production os.Environ. Семантика — как у Getenv.
+	// Environ возвращает окружение при резолве языка (FSTAB_EDIT_LANG) и
+	// загрузке config (FSTAB_EDIT_*); nil — production os.Environ. Семантика
+	// — как у Getenv.
 	Environ func() []string
+	// Getuid/Geteuid возвращают real/effective UID процесса для security-checks
+	// config и контекста событий журнала; nil — production os.Getuid/os.Geteuid.
+	Getuid  func() int
+	Geteuid func() int
+	// Now возвращает текущее время для измерения duration операций и
+	// timestamp событий; nil — production time.Now.
+	Now func() time.Time
+	// DefaultConfigPath задаёт значение флага --config по умолчанию; пустое —
+	// production: флаг без default и config ищется по авто-путям system/user.
+	// Тесты передают путь к YAML в tempdir, чтобы журнал и настройки не
+	// касались системных путей (/var/log, /etc/fstab-edit).
+	DefaultConfigPath string
 }
 
 // App связывает Cobra root command, глобальные флаги и доменный Service.
@@ -87,6 +105,13 @@ type App struct {
 	// диагностика и help-тексты печатаются на нём. Заполняется до
 	// root.Execute, поэтому handler'ы читают поле, а не флаг.
 	lang string
+	// settings — настройки, резолвленные из config/env/CLI в PersistentPreRunE
+	// (приоритеты ТЗ §13.1). Заполнены до любого handler'а.
+	settings config.Settings
+	// log — открытый журнал; nil для read-only команд и --dry-run (ТЗ §14:
+	// файловый журнал для них не создаётся). Открывается до mutation, чтобы
+	// недоступность журнала блокировала изменение target.
+	log *logger.Logger
 }
 
 // globalFlags хранит значения persistent-флагов корня; заполняются Cobra
@@ -122,6 +147,15 @@ func NewApp(options AppOptions) *App {
 	}
 	if options.Environ == nil {
 		options.Environ = os.Environ
+	}
+	if options.Getuid == nil {
+		options.Getuid = os.Getuid
+	}
+	if options.Geteuid == nil {
+		options.Geteuid = os.Geteuid
+	}
+	if options.Now == nil {
+		options.Now = time.Now
 	}
 	if options.Version == "" {
 		options.Version = "dev"
@@ -194,6 +228,12 @@ func (a *App) Execute(args []string) int {
 	a.localize(a.lang)
 	a.root.SetArgs(args)
 	err := a.root.Execute()
+	// Журнал закрывается после root.Execute: handler'ы дописали события,
+	// файловый дескриптор освобождается штатно. nil-safe: read-only и
+	// dry-run команды журнал не открывали.
+	if a.log != nil {
+		_ = a.log.Close()
+	}
 	if err == nil {
 		return cliapp.ExitSuccess
 	}
@@ -327,7 +367,22 @@ func (a *App) buildRootCommand() *cobra.Command {
 		// Completion shell-скрипты не входят в контракт CLI первого блока.
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			return a.validateGlobalFlags()
+			if err := a.validateGlobalFlags(); err != nil {
+				return err
+			}
+			if exitErr := a.resolveSettings(cmd); exitErr != nil {
+				return exitErr
+			}
+			// Журнал открывается до любого handler'а мутации (ТЗ §14):
+			// недоступность журнала блокирует изменение target раньше,
+			// чем backup/lock/write начнутся. Dry-run и read-only команды
+			// файловый журнал не создают.
+			if isMutatingCommand(cmd.Name()) && !a.flags.dryRun {
+				if exitErr := a.openLog(); exitErr != nil {
+					return exitErr
+				}
+			}
+			return nil
 		},
 	}
 	root.SetVersionTemplate("fstab-edit version {{.Version}}\n")
@@ -347,7 +402,7 @@ func (a *App) buildRootCommand() *cobra.Command {
 	flags.StringVar(&a.flags.backupDir, "backup-dir", "", "каталог резервных копий (по умолчанию — каталог target)")
 	flags.BoolVar(&a.flags.offline, "offline", false, "отключить проверки внешних ресурсов")
 	flags.StringVar(&a.flags.lang, "lang", "", "язык сообщений: ru, en (по умолчанию — авто-резолв из окружения)")
-	flags.StringVar(&a.flags.config, "config", "", "путь к YAML-конфигурации")
+	flags.StringVar(&a.flags.config, "config", a.options.DefaultConfigPath, "путь к YAML-конфигурации")
 
 	root.AddCommand(
 		a.buildListCommand(),
@@ -392,6 +447,138 @@ func (a *App) validateGlobalFlags() error {
 			"флаги --verbose и --quiet несовместимы: выберите один режим вывода")
 	}
 	return nil
+}
+
+// isMutatingCommand сообщает, относится ли команда к мутирующим: именно
+// они открывают журнал до выполнения (ТЗ §14). Read-only list/validate/
+// verify-mount журнал не создают.
+func isMutatingCommand(name string) bool {
+	switch name {
+	case "add", "edit", "delete", "comment", "uncomment", "rollback", "backup":
+		return true
+	}
+	return false
+}
+
+// resolveSettings загружает настройки через config.Load (приоритеты ТЗ
+// §13.1: CLI > FSTAB_EDIT_* > user YAML > system YAML > defaults) и вливает
+// поверх них явно заданные CLI-флаги. PersistentPreRunE гарантирует вызов
+// до любого handler'а; normalize-флаги (file/backup-dir/log-level) делают
+// резолвленные значения доступными handler'ам через a.flags без изменения
+// их кода. --lang выше env/локали уже обеспечивают pre-scan в Execute,
+// config язык не задаёт (ТЗ §13.3). Ошибки маппятся на exit codes: security
+// → 3, остальные → 2, сообщения переводятся ключами config.*.
+func (a *App) resolveSettings(cmd *cobra.Command) *cliapp.ExitError {
+	settings, warnings, err := config.Load(config.LoadOptions{
+		ExplicitPath: a.flags.config,
+		Environ:      a.options.Environ(),
+		EUID:         a.options.Geteuid(),
+		LookupUser:   config.LookupUserByUID,
+	})
+	if err != nil {
+		var loadErr *config.LoadError
+		code := cliapp.ExitUsage
+		key := "config.invalid"
+		if errors.As(err, &loadErr) && loadErr.Kind == "security" {
+			code = cliapp.ExitPermission
+			key = "config.security"
+		}
+		// Структурный ExitError: NewExitErrorK использует ключ и как format,
+		// поэтому для ключей с аргументами корректнее собрать Message явно.
+		return &cliapp.ExitError{
+			Code:        code,
+			Message:     fmt.Sprintf("конфигурация %s отклонена", a.flags.config),
+			MessageKey:  key,
+			MessageArgs: []any{a.flags.config},
+			Cause:       err,
+		}
+	}
+	for _, warning := range warnings {
+		a.writeStderr("warning: " + warning + "\n")
+	}
+	if cmd.Flags().Changed("file") {
+		settings.FstabPath = a.flags.file
+	}
+	if cmd.Flags().Changed("backup-dir") {
+		settings.BackupDir = a.flags.backupDir
+	}
+	if cmd.Flags().Changed("log-level") {
+		settings.LogLevel = a.flags.logLevel
+	}
+	if cmd.Flags().Changed("output") {
+		settings.Output = a.flags.output
+	}
+	// Normalize: значения, не заданные CLI, приходят из config/env/defaults.
+	// env-значения валидирует config.validateValues, CLI — validateGlobalFlags,
+	// поэтому повторная валидация здесь не нужна.
+	if !cmd.Flags().Changed("file") {
+		a.flags.file = settings.FstabPath
+	}
+	if !cmd.Flags().Changed("backup-dir") {
+		a.flags.backupDir = settings.BackupDir
+	}
+	if !cmd.Flags().Changed("log-level") {
+		a.flags.logLevel = settings.LogLevel
+	}
+	if !cmd.Flags().Changed("output") && settings.Output != "" {
+		a.flags.output = settings.Output
+	}
+	a.settings = settings
+	return nil
+}
+
+// openLog открывает файловый журнал для мутирующей команды (ТЗ §14): журнал
+// обязан быть доступен до точки изменения target. Sudo-контекст берётся из
+// SUDO_USER/SUDO_UID и включается в события, только когда SUDO_UID непустой
+// и числовой. Ошибка открытия маппится на code 3 при отказе в правах,
+// иначе 6: target к этому моменту ещё не тронут.
+func (a *App) openLog() *cliapp.ExitError {
+	sudoUID := a.options.Getenv("SUDO_UID")
+	sudoUser := ""
+	if sudoUID != "" {
+		if _, err := strconv.Atoi(sudoUID); err != nil {
+			sudoUID = "" // нечисловой SUDO_UID не доверяем
+		} else {
+			sudoUser = a.options.Getenv("SUDO_USER")
+		}
+	}
+	log, err := logger.Open(logger.Options{
+		File:         a.settings.LogFile,
+		Level:        logger.Severity(a.settings.LogLevel),
+		MaxSizeMB:    a.settings.LogMaxSizeMB,
+		Keep:         a.settings.LogKeep,
+		RealUID:      a.options.Getuid(),
+		EffectiveUID: a.options.Geteuid(),
+		SudoUser:     sudoUser,
+		SudoUID:      sudoUID,
+		Now:          a.options.Now,
+	})
+	if err != nil {
+		code := cliapp.ExitIO
+		if errors.Is(err, os.ErrPermission) {
+			code = cliapp.ExitPermission
+		}
+		return &cliapp.ExitError{
+			Code:        code,
+			Message:     fmt.Sprintf("открыть журнал %s", a.settings.LogFile),
+			MessageKey:  "error.log.open",
+			MessageArgs: []any{a.settings.LogFile},
+			Cause:       err,
+		}
+	}
+	a.log = log
+	return nil
+}
+
+// logEvent пишет событие в журнал; ошибка записи игнорируется, чтобы сбой
+// журнала после успешного replace не мешал обязательному rollback и не
+// заменял первичную ошибку команды. Журнал не открыт (nil) — событие
+// пропускается молча: read-only и dry-run команды журнал не создают.
+func (a *App) logEvent(event logger.Event) {
+	if a.log == nil {
+		return
+	}
+	_ = a.log.Log(event)
 }
 
 // format возвращает провалидированный формат вывода. PersistentPreRunE

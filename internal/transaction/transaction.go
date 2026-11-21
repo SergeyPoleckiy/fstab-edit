@@ -53,6 +53,13 @@ type Options struct {
 	// RotationProtectedIDs защищает выбранные backups от ротации. Сам backup текущей
 	// transaction будет добавлен transaction отдельно и не должен здесь дублироваться.
 	RotationProtectedIDs []string
+	// BackupDirectory, BackupPrefix и RotationKeep переносят backup-настройки,
+	// резолвленные CLI-слоем (config/env/флаги), в transaction, когда Plan —
+	// построенный доменным слоем из preview — не задаёт их явно. Plan имеет
+	// приоритет: значения из Options используются только как fallback.
+	BackupDirectory string
+	BackupPrefix    string
+	RotationKeep    int
 }
 
 // RecoveryPaths указывает файлы, которые нужны для ручного восстановления после
@@ -357,6 +364,18 @@ func Execute(ctx context.Context, plan Plan, options Options) (TransactionResult
 func executeWithOperations(ctx context.Context, plan Plan, options Options, operations transactionOperations) (result TransactionResult, err error) {
 	if err := validateTransactionOperations(operations); err != nil {
 		return TransactionResult{}, err
+	}
+
+	// Backup-fallback из Options: CLI резолвит каталог/prefix/keep независимо
+	// от Plan, поэтому пустые поля Plan дополняются настройками запуска.
+	if plan.BackupDirectory == "" {
+		plan.BackupDirectory = options.BackupDirectory
+	}
+	if plan.BackupPrefix == "" {
+		plan.BackupPrefix = options.BackupPrefix
+	}
+	if plan.RotationKeep <= 0 {
+		plan.RotationKeep = options.RotationKeep
 	}
 
 	prepared, err := prepareTransaction(plan, prepareOperations{readSnapshot: operations.readSnapshot})
