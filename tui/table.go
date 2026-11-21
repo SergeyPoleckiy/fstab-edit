@@ -40,13 +40,18 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.session == nil {
 			break
 		}
-		if idxs := m.entryIndexes(); m.cursor < len(idxs) {
-			line := idxs[m.cursor] + 1
+		if m.cursor < len(entries) {
+			line := entries[m.cursor] + 1
 			if err := m.session.applyOp(m.document, func(d *models.Document) error {
 				_, err := editor.Delete(d, editor.ByLine(line))
 				return err
 			}); err != nil {
 				m.status = m.theme.MarkError(Trf(m.opts.Lang, "op_failed", err.Error()))
+			}
+			// Зажать курсор: после удаления последней записи индекс уходил
+			// за пределы списка, и навигация/статус работали по пустоте.
+			if n := len(m.entryIndexes()); m.cursor >= n {
+				m.cursor = max(0, n-1)
 			}
 		}
 	case "ctrl+z":

@@ -25,11 +25,14 @@ func (s *sessionState) applyOp(document *models.Document, op func(*models.Docume
 	if err := op(document); err != nil {
 		return err
 	}
-	s.dirty = !bytes.Equal(before, document.Serialize())
-	if !s.dirty {
-		return nil // no-op не попадает в историю
+	after := document.Serialize()
+	if bytes.Equal(before, after) {
+		return nil // no-op не попадает в историю и не меняет dirty
 	}
 	s.undoStack = append(s.undoStack, append([]byte(nil), before...))
+	// dirty сравнивается с original сессии, а не с дельтой операции: иначе
+	// no-op при уже изменённом документе ошибочно сбрасывал бы dirty.
+	s.dirty = !bytes.Equal(after, s.original)
 	return nil
 }
 

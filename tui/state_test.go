@@ -79,6 +79,46 @@ func TestApplyOpNoopNotInStack(t *testing.T) {
 	}
 }
 
+// TestApplyOpNoopKeepsDirty — регрессия: dirty сравнивается с original сессии,
+// а не с дельтой одной операции. No-op при уже изменённом документе не должен
+// сбрасывать dirty; undo откатывает реальную мутацию и dirty=false.
+func TestApplyOpNoopKeepsDirty(t *testing.T) {
+	doc := testDocument(t, "UUID=a / ext4 defaults 0 1\n")
+	s := &sessionState{original: doc.Serialize()}
+	add := func() {
+		t.Helper()
+		if err := s.applyOp(doc, func(d *models.Document) error {
+			_, err := editor.Add(d, editor.NewEntry{Source: "UUID=b", MountPoint: "/data", FSType: "ext4", Options: "rw"})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add()
+	if !s.dirty {
+		t.Fatal("после мутации dirty обязан быть true")
+	}
+	// Успешная no-op операция: nil-ошибка, документ не изменён.
+	if err := s.applyOp(doc, func(d *models.Document) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if !s.dirty {
+		t.Fatal("no-op не должна сбрасывать dirty при живых несохранённых изменениях")
+	}
+	if len(s.undoStack) != 1 {
+		t.Fatalf("no-op не должна попадать в undo-стек, в стеке %d снапшотов", len(s.undoStack))
+	}
+	if !s.undo(doc) {
+		t.Fatal("undo должен вернуть true")
+	}
+	if s.dirty {
+		t.Fatal("после undo реальной мутации dirty=false")
+	}
+	if !bytes.Equal(doc.Serialize(), s.original) {
+		t.Fatal("документ не восстановлен")
+	}
+}
+
 // TestUndoRestoresSnapshot: undo восстанавливает документ, пересчитывает
 // dirty и возвращает false при пустом стеке.
 func TestUndoRestoresSnapshot(t *testing.T) {
