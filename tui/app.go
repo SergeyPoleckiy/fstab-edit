@@ -72,6 +72,9 @@ type model struct {
 	loadErr  error
 	cursor   int // выбранная строка таблицы (индекс записи)
 	status   string
+	// session несохранённые изменения и undo-стек; nil при ошибке загрузки
+	// (loadErr-экран мутации недоступны, но доступ к полю защищён nil-check).
+	session *sessionState
 }
 
 // NewModel загружает target и собирает начальное состояние. Ошибка загрузки
@@ -89,6 +92,7 @@ func NewModel(opts options) tea.Model {
 		return m
 	}
 	m.document = parser.Parse(snapshot.Data)
+	m.session = &sessionState{original: append([]byte(nil), snapshot.Data...)}
 	return m
 }
 

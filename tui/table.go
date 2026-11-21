@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"fstab-edit/internal/editor"
 	"fstab-edit/pkg/models"
 )
 
@@ -32,9 +33,34 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = ScreenLog
 	case "f1", "?":
 		m.screen = ScreenHelp
+	case "d", "delete":
+		// Удаление записи под курсором: селектор — физическая строка записи.
+		// session nil только на loadErr-экране, который сюда не доходит,
+		// но защита обязательна: паника недопустима.
+		if m.session == nil {
+			break
+		}
+		if idxs := m.entryIndexes(); m.cursor < len(idxs) {
+			line := idxs[m.cursor] + 1
+			if err := m.session.applyOp(m.document, func(d *models.Document) error {
+				_, err := editor.Delete(d, editor.ByLine(line))
+				return err
+			}); err != nil {
+				m.status = m.theme.MarkError(Trf(m.opts.Lang, "op_failed", err.Error()))
+			}
+		}
+	case "ctrl+z":
+		if m.session == nil {
+			break
+		}
+		if m.session.undo(m.document) {
+			m.status = Tr(m.opts.Lang, "undo_done")
+		} else {
+			m.status = m.theme.Muted.Render(Tr(m.opts.Lang, "undo_empty"))
+		}
 	}
-	// Enter (редактирование/добавление форм), Del (удаление), Ctrl+Z (отмена),
-	// Ins, F2, Ctrl+S (сохранение), F5 (перезагрузка) подключаются Task 2–4.
+	// Enter (редактирование/добавление форм), Ins, F2, Ctrl+S (сохранение),
+	// F5 (перезагрузка) подключаются Task 3–5.
 	return m, nil
 }
 
@@ -64,7 +90,12 @@ func nodePositionLine(_ *models.Document, idx int) int { return idx + 1 }
 // записи помечаются текстовым маркером "-" в колонке активности.
 func (m model) viewTable() string {
 	var b strings.Builder
-	b.WriteString(m.theme.Title.Render(Tr(m.opts.Lang, "app_title")) + "\n\n")
+	title := m.theme.Title.Render(Tr(m.opts.Lang, "app_title"))
+	if m.session != nil && m.session.dirty {
+		// Dirty-индикатор ТЗ §9.1: "*" в заголовке при несохранённых изменениях.
+		title += m.theme.Dirty.Render(" *")
+	}
+	b.WriteString(title + "\n\n")
 	header := fmt.Sprintf("%-3s %-24s %-12s %-8s %-20s %s %s %s",
 		Tr(m.opts.Lang, "col_num"), Tr(m.opts.Lang, "col_device"), Tr(m.opts.Lang, "col_mount"),
 		Tr(m.opts.Lang, "col_type"), Tr(m.opts.Lang, "col_options"),

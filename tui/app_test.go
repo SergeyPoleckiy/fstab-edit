@@ -77,3 +77,33 @@ func TestAppShowsTableAndQuits(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
 }
+
+// TestDeleteAndUndoFlow проверяет сквозной цикл сессии: 'd' удаляет запись под
+// курсором (вторая строка исчезает из таблицы, в заголовке появляется "*"),
+// ctrl+z откатывает мутацию (строка возвращается, "*" исчезает).
+func TestDeleteAndUndoFlow(t *testing.T) {
+	target := writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\nUUID=bbb /mnt/data ext4 rw 0 2\n")
+	m := NewModel(testOptions(t, target))
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(100, 30))
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return strings.Contains(string(b), "/mnt/data")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// 'd' — delete: запись под курсором (первая) удалена, вторая осталась.
+	// Dirty-индикатор "*" появился в заголовке.
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		s := string(b)
+		return !strings.Contains(s, "UUID=aaa") && strings.Contains(s, "*")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// ctrl+z — undo: первая запись вернулась, dirty-индикатор исчез.
+	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlZ})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		s := string(b)
+		return strings.Contains(s, "UUID=aaa") && !strings.Contains(s, "*")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+}
