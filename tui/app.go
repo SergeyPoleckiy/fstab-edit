@@ -39,26 +39,26 @@ const (
 	ScreenConfirmReload
 )
 
-// options — параметры запуска TUI (все уже резолвлены cmd-слоем).
-type options struct {
+// Options — параметры запуска TUI (все уже резолвлены cmd-слоем).
+type Options struct {
 	Target string // target fstab (default /etc/fstab, --file переопределяет)
 	Lang   string // резолвленный язык ru|en
 	Theme  string // tui.theme из config: "dark" (default) | "monochrome"
-	Backup backupSettings
-	Log    logSettings
+	Backup BackupSettings
+	Log    LogSettings
 	Runner sysutil.CommandRunner // findmnt; тесты подменяют
 	Deps   *Deps                 // nil → ProductionDeps
 }
 
-// backupSettings — dir/prefix/keep из config (пустой dir = каталог target).
-type backupSettings struct {
+// BackupSettings — dir/prefix/keep из config (пустой dir = каталог target).
+type BackupSettings struct {
 	Dir    string
 	Prefix string
 	Keep   int
 }
 
-// logSettings — file/level/max_size_mb/keep из config.
-type logSettings struct {
+// LogSettings — file/level/max_size_mb/keep из config.
+type LogSettings struct {
 	File      string
 	Level     string
 	MaxSizeMB int
@@ -68,7 +68,7 @@ type logSettings struct {
 // model — bubbletea-модель TUI. Все поля unexported; тесты читают состояние
 // через View() и ScreenNow().
 type model struct {
-	opts     options
+	opts     Options
 	theme    Theme
 	screen   Screen
 	document *models.Document // nil при ошибке загрузки
@@ -92,9 +92,9 @@ type model struct {
 	history historyModel
 }
 
-// deps возвращает границы отказа модели: явно заданные через options.Deps
+// deps возвращает границы отказа модели: явно заданные через Options.Deps
 // (тесты) или production-набор, материализованный лениво. NewModel не
-// сохраняет production-набор в options, чтобы zero-value model оставался
+// сохраняет production-набор в Options, чтобы zero-value model оставался
 // рабочим в тестах Task 1/2.
 func (m *model) deps() *Deps {
 	if m.opts.Deps != nil {
@@ -107,7 +107,7 @@ func (m *model) deps() *Deps {
 
 // NewModel загружает target и собирает начальное состояние. Ошибка загрузки
 // не паникует: показывается статусная строка с предложением F5.
-func NewModel(opts options) tea.Model {
+func NewModel(opts Options) tea.Model {
 	m := model{opts: opts, theme: LoadTheme(opts.Theme), screen: ScreenTable}
 	deps := opts.Deps
 	if deps == nil {
@@ -125,7 +125,7 @@ func NewModel(opts options) tea.Model {
 }
 
 // loggerOptions собирает logger.Options из резолвленных настроек TUI.
-func loggerOptions(opts options) logger.Options {
+func loggerOptions(opts Options) logger.Options {
 	return logger.Options{
 		File: opts.Log.File, Level: logger.Severity(opts.Log.Level),
 		MaxSizeMB: opts.Log.MaxSizeMB, Keep: opts.Log.Keep,
@@ -134,8 +134,9 @@ func loggerOptions(opts options) logger.Options {
 	}
 }
 
-// sudoUser читает SUDO_USER из окружения; пустое значение означает запуск
-// без sudo. Инъекция окружения появится в Task 7 — пока прямое чтение env.
+// sudoUser читает SUDO_USER из окружения процесса; пустое значение означает
+// запуск без sudo. Чтение env остаётся прямым: tui.Options намеренно не
+// несёт getenv-инъекции, cmd-слой резолвит окружение для собственных нужд.
 func sudoUser() string { return os.Getenv("SUDO_USER") }
 
 // sudoUID читает SUDO_UID из окружения; значение включается в журнал только
@@ -155,8 +156,8 @@ func sudoUID() string {
 func (m model) Init() tea.Cmd { return nil }
 
 // Update обрабатывает сообщения. Навигация общая для всех экранов:
-// Esc возвращает на таблицу; подтверждение выхода при dirty подключится
-// вместе с полноценным циклом quit (Task 7), здесь — заглушка.
+// Esc возвращает на таблицу; выход без подтверждения (подтверждение при
+// несохранённых изменениях вынесено за пределы этапа 2).
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -216,7 +217,7 @@ func (m model) View() string {
 func (m model) ScreenNow() Screen { return m.screen }
 
 // Run запускает bubbletea-программу. Вызывается из cmd-слоя.
-func Run(opts options) error {
+func Run(opts Options) error {
 	_, err := tea.NewProgram(NewModel(opts), tea.WithAltScreen()).Run()
 	return err
 }

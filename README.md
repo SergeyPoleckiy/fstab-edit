@@ -10,7 +10,7 @@
 
 ## Статус
 
-- Текущий этап: **1 — ядро и CLI**. CLI реализован и собирается в статический бинарь `fstab-edit`; TUI остаётся будущим этапом.
+- Текущие этапы: **1 — ядро и CLI** и **2 — TUI**. CLI реализован и собирается в статический бинарь `fstab-edit`; TUI (пакет `tui/`, команда `tui`) реализован: таблица записей, формы добавления/редактирования, undo, транзакционное сохранение с rollback-результатом, экраны diff/монтирований/журнала/истории/помощи, темы dark/monochrome.
 - Реализованы модель данных, lossless parser, selectors и in-memory mutations: Add, Edit, Delete, Comment и Uncomment, включая связанные comment blocks.
 - Реализованы публичная модель diagnostics и внутренний read-only validator: проверки полей, source/mount/FS type, опций, duplicates и специальные предупреждения работают детерминированно с документом в памяти.
 - Реализован secure runner: исполняемые файлы разрешаются только в фиксированных системных каталогах, аргументы передаются без shell, локаль фиксируется как `LC_ALL=C`. По умолчанию действуют timeout **10 секунд** и ограничение **64 KiB на каждый поток** stdout/stderr.
@@ -20,7 +20,7 @@
 - Реализованы secure snapshot/base-hash conflict, стабильные flock и низкоуровневый атомарный `Replace` с сохранением metadata/xattrs. Реализованы backup и ротация: `Create`, `Open`, `List`, `Select` и `Rotate` в `internal/backup`.
 - Реализована доменная transaction в `internal/transaction`: internal validation, lock, повторный base SHA-256, `findmnt` candidate check, backup текущей операции, atomic replace, post-check, один automatic rollback и ротация после полного успеха.
 - Реализован CLI на Cobra (`cmd/`, `main.go`): десять команд `list`, `add`, `edit`, `delete`, `comment`, `uncomment`, `validate`, `verify-mount`, `backup`, `rollback`; dry-run, подтверждения `[y/N]`, unified diff, селекторы записей с кодом неоднозначности 8 и форматы вывода `table`/`json`/`csv`/`tsv` со `schema_version: 1`. Тесты CLI работают только с временными файлами, fake runner и scripted stdin; реальный `/etc/fstab` и findmnt не затрагиваются.
-- Реализованы YAML-конфигурация с приоритетами и security-checks (`internal/config`), структурный JSON Lines-журнал с rotation и redaction (`internal/logger`) и локализация RU/EN (`internal/i18n`); оба пакета подключены к CLI: настройки резолвятся до handler'ов, журнал открывается до любой мутации и фиксирует исход операций. Команда `tui` остаётся будущим этапом.
+- Реализованы YAML-конфигурация с приоритетами и security-checks (`internal/config`), структурный JSON Lines-журнал с rotation и redaction (`internal/logger`) и локализация RU/EN (`internal/i18n`); оба пакета подключены к CLI: настройки резолвятся до handler'ов, журнал открывается до любой мутации и фиксирует исход операций. Команда `tui` открывает полноценный TUI-редактор (см. раздел «TUI» ниже).
 - Актуальная основа разработки: [ТЗ версии 2.0](../fstab-editor-v2.md).
 - Исходная редакция сохранена: [ТЗ версии 1.0](../fstab-editor.md).
 
@@ -77,12 +77,41 @@ go build -o fstab-edit .
 | `verify-mount` | Статический `findmnt --verify` по фактическим байтам target |
 | `backup` | Создаёт ручную копию без изменения target |
 | `rollback` | Восстанавливает выбранную копию |
+| `tui` | Открывает интерактивный TUI-редактор (см. раздел «TUI») |
 
 Селектор записи — позиционный `<id>` (номер строки, mount point или source) либо ровно один из `--line`, `--mount-point`, `--device`; несколько совпадений дают exit code **8** со списком кандидатов. `add` требует `--device`, `--mount`, `--type`, `--options` (dump/pass по умолчанию `0`); `edit` требует селектор и хотя бы один изменяющий флаг.
 
 Подтверждение `[y/N]` (по умолчанию отказ) обязательно для мутаций и `rollback`: без TTY требуется `--yes`, при этом `--yes` не обходит ошибки валидации, неоднозначность селектора и внешние сбои. Интерактивный diff и warning-preview печатаются в stderr только в prompt-режиме: `--yes` пропускает prompt целиком и ничего не печатает, а diff и diagnostics остаются доступными в полях machine-JSON (`diff`, `diagnostics`). `--dry-run` показывает diff и diagnostics, ничего не меняя и не требуя `--yes`.
 
 Форматы вывода `--output=table|json|csv|tsv`; JSON — `schema_version: 1`. Обычные данные — stdout (ровно один structured document для machine-форматов), диагностика, diff и prompts — stderr. Exit codes: 0 успех (warnings допустимы), 1 validation, 2 usage, 3 недостаток прав (небезопасный config, недоступный журнал), 4 lock/base conflict, 5 внешняя утилита, 6 I/O/backup/write, 7 критический rollback (наивысший приоритет), 8 неоднозначный селектор.
+
+## TUI
+
+Интерактивный редактор (`fstab-edit tui` или просто `fstab-edit` без аргументов) открывает таблицу записей target. Требуется интерактивный терминал (TTY): без него команда завершается usage error (exit 2) с сообщением `tui.no_tty`. Запуск без аргументов подменяется на `tui` только при пустом argv — `--help`, `--version` и остальные команды работают как раньше.
+
+Основные клавиши (главный экран):
+
+| Клавиша | Действие |
+|---------|----------|
+| `↑`/`↓`, `k`/`j` | Перемещение курсора |
+| `Enter` | Редактировать запись под курсором |
+| `Ins` | Добавить запись |
+| `Del` | Удалить запись под курсором |
+| `d` | Diff несохранённых изменений |
+| `M` | Статус монтирований (findmnt) |
+| `H` | История резервных копий |
+| `L` | Журнал операций |
+| `F1` или `?` | Помощь |
+| `Ctrl+Z` | Отменить последнее действие |
+| `F5` | Перезагрузить target (при несохранённых изменениях — подтверждение) |
+| `Ctrl+S`/`F2` | Сохранить через transaction (backup → findmnt → atomic replace) |
+| `q`/`Ctrl+Q`/`Ctrl+C` | Выход |
+
+Экраны истории (`H`) поддерживают `d` (diff копии против target) и `r` (restore копии через доменный rollback с safety backup). Сохранение и восстановление идут через те же transaction/rollback-механизмы, что и CLI: отдельной небезопасной реализации записи в TUI нет.
+
+Тема оформления — `tui.theme` в конфигурации: `dark` (по умолчанию) или `monochrome`; ошибки и предупреждения помечаются текстовыми маркерами (`!`, `*`) во всех темах. Язык интерфейса — общий резолв `--lang`/`FSTAB_EDIT_LANG`/локаль.
+
+Ограничения: мышь не поддерживается (только клавиатура); расширенные экраны этапов 3–4 ТЗ (в т.ч. дополнения §9.5) — будущая работа.
 
 ## Конфигурация
 
@@ -91,7 +120,7 @@ go build -o fstab-edit .
 - Пути автоматической загрузки: system — `/etc/fstab-edit/config.yaml` (требует root-ownership), user — `~/.config/fstab-edit/config.yaml`. Root-процесс (euid 0) user-config автоматически не загружает (ТЗ §13.2).
 - `--config <path>` задаёт явный YAML вместо system/user; env всё равно выше его.
 - Env-переменные: `FSTAB_EDIT_FILE`, `FSTAB_EDIT_BACKUP_DIR`, `FSTAB_EDIT_LOG_LEVEL`, `FSTAB_EDIT_LANG`, `FSTAB_EDIT_OUTPUT`. Неизвестные `FSTAB_EDIT_*` печатают `warning: ...` в stderr и игнорируются.
-- YAML-схема (ТЗ §13.3): `fstab_path`, `backup.dir|prefix|keep`, `log.file|level|max_size_mb|keep`, `tui.theme`. Язык и формат вывода из YAML не читаются (только env/CLI).
+- YAML-схема (ТЗ §13.3): `fstab_path`, `backup.dir|prefix|keep`, `log.file|level|max_size_mb|keep`, `tui.theme`. Язык и формат вывода из YAML не читаются (только env/CLI). Ключ `tui.theme` задаёт оформление TUI (`dark` — по умолчанию, `monochrome`).
 - Security-checks (ТЗ §13.2): symlink-конфигурация отклоняется, файл не должен быть group/others-writable (иначе exit code 3), system-config обязан принадлежать root, user/explicit — effective UID. Некорректный YAML или значения — exit code 2.
 
 ## Журналирование
@@ -100,7 +129,7 @@ go build -o fstab-edit .
 
 - Событие — одна JSON-строка: `severity`, `timestamp` (RFC 3339 UTC), `real_uid`/`effective_uid`, `sudo_user`/`sudo_uid` (только при числовом `SUDO_UID`), `operation` (`add`, `edit`, `delete`, `comment`, `uncomment`, `backup`, `rollback`), `target`, `backup_id`, `result` (`success`/`error`/`cancelled`), `error_code`, `duration_ms`, `old_value`/`new_value`. Коды и поля не локализуются.
 - Журнал открывается **до** любой мутации (`add`/`edit`/`delete`/`comment`/`uncomment`/`rollback`/`backup`): недоступный журнал блокирует изменение target кодом 3 (нет прав) или 6 (прочий I/O) — backup/lock/write не начинаются. Сбой записи после успешного replace игнорируется и не мешает обязательному rollback.
-- Read-only команды (`list`, `validate`, `verify-mount`) и `--dry-run` файловый журнал не создают вовсе.
+- Read-only команды (`list`, `validate`, `verify-mount`) и `--dry-run` файловый журнал не создают вовсе. TUI не открывает журнал при старте: журнал открывается внутри транзакции сохранения, поэтому недоступный журнал блокирует именно сохранение.
 - Rotation: при превышении `log.max_size_mb` (default 10 MiB) текущий файл уходит в `<file>.1`, архивы сдвигаются до `log.keep` (default 5).
 - Redaction: `old_value`/`new_value` (изменённые строки diff) проходят маскировку секретов — `password=`, `credentials=`, `token=`, userinfo URL и др. заменяются на `***`.
 

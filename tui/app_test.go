@@ -52,10 +52,10 @@ func testDeps(t *testing.T) *Deps {
 	return &deps
 }
 
-// testOptions собирает options для тестов: tempdir target, fake deps.
-func testOptions(t *testing.T, target string) options {
+// testOptions собирает Options для тестов: tempdir target, fake deps.
+func testOptions(t *testing.T, target string) Options {
 	t.Helper()
-	return options{
+	return Options{
 		Target: target,
 		Lang:   "ru",
 		Theme:  "dark",

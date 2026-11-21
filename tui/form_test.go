@@ -87,7 +87,7 @@ func TestApplyAddThroughSession(t *testing.T) {
 }
 
 // TestApplyEditChangesOnlySelected проверяет, что edit-форма меняет только
-// выбранную запись: правка options первой записи не затрагивает вторую.
+// выбранную запись: правка Options первой записи не затрагивает вторую.
 func TestApplyEditChangesOnlySelected(t *testing.T) {
 	doc := testDocument(t, "UUID=a /data ext4 rw 0 2\nUUID=b /home ext4 defaults 0 2\n")
 	m := model{document: doc, session: &sessionState{original: doc.Serialize()}}
@@ -128,7 +128,7 @@ func TestPreviewShowsRawLine(t *testing.T) {
 // Tab двигает вперёд по семи полям (6 полей + комментарий) и заворачивает
 // с последнего на первое, Shift+Tab — назад.
 func TestFormFocusCyclesThroughFields(t *testing.T) {
-	m := model{opts: options{Lang: "ru"}, screen: ScreenForm, form: newAddForm()}
+	m := model{opts: Options{Lang: "ru"}, screen: ScreenForm, form: newAddForm()}
 	step := func(key tea.KeyMsg) model {
 		next, _ := m.Update(key)
 		return next.(model)
@@ -166,7 +166,7 @@ func TestFormAddFlow(t *testing.T) {
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
-		return strings.Contains(string(b), "form_title_add")
+		return strings.Contains(string(b), "Новая запись")
 	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
 
 	fields := []string{"UUID=zz", "/data", "ext4", "rw", "0", "2"}

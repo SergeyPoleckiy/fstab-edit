@@ -23,7 +23,7 @@ func keyRunes(runes ...rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, 
 // createTestBackup перезаписывает target заданным содержимым и создаёт
 // production-копию через backup.Create с фиксированным временем. Каталог и
 // prefix берутся по умолчанию (рядом с target, fstab.bak.*), что совпадает с
-// пустыми backupSettings тестовых options.
+// пустыми BackupSettings тестовых Options.
 func createTestBackup(t *testing.T, target, content string, moment time.Time) backup.Backup {
 	t.Helper()
 	if err := os.WriteFile(target, []byte(content), 0o600); err != nil {
@@ -203,7 +203,7 @@ func TestHistoryScreenFlow(t *testing.T) {
 	// 'r' — модальное подтверждение (default No); 'n' отменяет restore.
 	updated, _ = m.Update(keyRunes('r'))
 	m = updated.(model)
-	if !strings.Contains(m.View(), "history_confirm_restore") {
+	if !strings.Contains(m.View(), "восстановить копию") {
 		t.Fatal("после 'r' должно показываться подтверждение restore")
 	}
 	updated, _ = m.Update(keyRunes('n'))
@@ -224,7 +224,7 @@ func TestHistoryScreenFlow(t *testing.T) {
 	if m.ScreenNow() != ScreenTable {
 		t.Fatalf("после restore ожидалась таблица, screen=%v", m.ScreenNow())
 	}
-	if !strings.Contains(m.status, "history_restore_ok") {
+	if !strings.Contains(m.status, "копия восстановлена") {
 		t.Fatalf("статус после restore: %q", m.status)
 	}
 	data, err := os.ReadFile(target)
@@ -313,7 +313,7 @@ func TestHistoryEmptyAndErrorViews(t *testing.T) {
 		m := testModel(t, testOptions(t, writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\n")))
 		updated, _ := m.Update(keyRunes('h'))
 		m = updated.(model)
-		if view := m.View(); !strings.Contains(view, "history_empty") {
+		if view := m.View(); !strings.Contains(view, "резервные копии не найдены") {
 			t.Fatalf("пустой список должен показывать muted-подпись: %q", view)
 		}
 		// Клавиши действий на пустом списке — без паники и без переходов.
@@ -335,8 +335,47 @@ func TestHistoryEmptyAndErrorViews(t *testing.T) {
 		m = updated.(model)
 		view := m.View()
 		// MarkError ставит текстовый маркер "!" — цвет недостаточен (ТЗ §9.4).
-		if !strings.Contains(view, "!") || !strings.Contains(view, "history_error") {
+		if !strings.Contains(view, "!") || !strings.Contains(view, "не удалось прочитать историю") {
 			t.Fatalf("сбой загрузки должен рендериться через MarkError: %q", view)
 		}
 	})
+}
+
+// TestFormatCreated фиксирует форматирование колонки created: RFC3339Nano
+// приводится к «2006-01-02 15:04:05», неразбираемое значение — fallback как есть.
+func TestFormatCreated(t *testing.T) {
+	cases := []struct {
+		name, raw, want string
+	}{
+		{"rfc3339nano utc", "2026-01-02T10:00:00Z", "2026-01-02 10:00:00"},
+		{"rfc3339nano offset", "2026-01-02T13:00:00.5+03:00", "2026-01-02 13:00:00"},
+		{"fallback raw", "not-a-time", "not-a-time"},
+		{"fallback empty", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := formatCreated(tc.raw); got != tc.want {
+				t.Fatalf("formatCreated(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHistoryViewFormatsCreated проверяет, что экран истории показывает
+// колонку created в читаемом виде, а не raw RFC3339Nano из метаданных.
+func TestHistoryViewFormatsCreated(t *testing.T) {
+	target := writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\n")
+	createTestBackup(t, target, "UUID=aaa / ext4 defaults 0 1\n",
+		time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC))
+
+	m := testModel(t, testOptions(t, target))
+	updated, _ := m.Update(keyRunes('h'))
+	m = updated.(model)
+	view := m.View()
+	if !strings.Contains(view, "2026-01-02 10:00:00") {
+		t.Fatalf("экран истории не показывает отформатированное created: %q", view)
+	}
+	if strings.Contains(view, "2026-01-02T10:00:00") {
+		t.Fatalf("raw RFC3339Nano утёк в экран истории: %q", view)
+	}
 }

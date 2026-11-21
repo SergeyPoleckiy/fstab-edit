@@ -42,7 +42,7 @@ func (s scriptedRunner) Run(_ context.Context, _ string, args ...string) sysutil
 
 // testModel собирает модель через NewModel и возвращает её значение для
 // прямых вызовов load*/Update/View вне псевдо-TTY teatest.
-func testModel(t *testing.T, opts options) model {
+func testModel(t *testing.T, opts Options) model {
 	t.Helper()
 	m, ok := NewModel(opts).(model)
 	if !ok {

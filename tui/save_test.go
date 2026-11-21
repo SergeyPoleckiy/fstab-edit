@@ -15,10 +15,10 @@ import (
 	"fstab-edit/pkg/models"
 )
 
-// saveTestOptions собирает options для save-тестов: tempdir target с journal-
+// saveTestOptions собирает Options для save-тестов: tempdir target с journal-
 // файлом, production-границы отказа (реальный transaction.Execute), backup-файлы
 // падают рядом с target в tempdir.
-func saveTestOptions(t *testing.T, target string) options {
+func saveTestOptions(t *testing.T, target string) Options {
 	t.Helper()
 	opts := testOptions(t, target)
 	opts.Log.File = filepath.Join(t.TempDir(), "fstab-edit.log")
@@ -34,7 +34,7 @@ func saveTestOptions(t *testing.T, target string) options {
 
 // newSaveTestModel собирает *model через NewModel и приводит tea.Model к
 // конкретному типу: save и reloadFromDisk — методы model.
-func newSaveTestModel(t *testing.T, opts options) *model {
+func newSaveTestModel(t *testing.T, opts Options) *model {
 	t.Helper()
 	m, ok := NewModel(opts).(model)
 	if !ok {

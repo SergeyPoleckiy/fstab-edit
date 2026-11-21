@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -38,6 +39,17 @@ func loadHistory(m *model) historyModel {
 	}
 	out.Backups = backups
 	return out
+}
+
+// formatCreated приводит RFC3339Nano timestamp метаданных к читаемому виду
+// «2006-01-02 15:04:05» (UTC, как и в метаданных); неразбираемое значение
+// показывается как есть — fallback безопаснее пустой ячейки.
+func formatCreated(raw string) string {
+	created, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return raw
+	}
+	return created.Format("2006-01-02 15:04:05")
 }
 
 // Selected возвращает копию под курсором. Вызывается только при непустом
@@ -171,7 +183,7 @@ func (m model) viewHistory() string {
 			"ID", "operation", "created")) + "\n")
 		for i, item := range m.history.Backups {
 			row := fmt.Sprintf("%-34s %-18s %s",
-				item.ID, item.Metadata.Operation, item.Metadata.CreatedAt)
+				item.ID, item.Metadata.Operation, formatCreated(item.Metadata.CreatedAt))
 			if i == m.history.Cursor {
 				row = m.theme.Selected.Render(row)
 			}
