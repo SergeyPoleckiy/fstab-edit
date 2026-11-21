@@ -27,10 +27,15 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 		}
 	case "m":
+		if m.session == nil {
+			break
+		}
+		m.mounts = loadMounts(context.Background(), &m)
 		m.screen = ScreenMounts
 	case "h":
 		m.screen = ScreenHistory
 	case "l":
+		m.logEvents = loadLog(&m, screenPageSize)
 		m.screen = ScreenLog
 	case "f1", "?":
 		m.screen = ScreenHelp
@@ -44,7 +49,15 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "insert", "i":
 		m.form = newAddForm()
 		m.screen = ScreenForm
-	case "d", "delete":
+	case "d":
+		// Diff несохранённых изменений сессии (Task 5). Удаление записи —
+		// клавишей Del: 'd' занят diff-экраном, как и внутри формы (Task 4).
+		if m.session == nil {
+			break
+		}
+		m.diff = newDiffModel(m.diffSession())
+		m.screen = ScreenDiff
+	case "delete":
 		// Удаление записи под курсором: селектор — физическая строка записи.
 		// session nil только на loadErr-экране, который сюда не доходит,
 		// но защита обязательна: паника недопустима.

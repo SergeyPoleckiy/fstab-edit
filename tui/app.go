@@ -82,6 +82,11 @@ type model struct {
 	// form — состояние формы добавления/редактирования записи; актуально,
 	// пока screen == ScreenForm (Task 4).
 	form formModel
+	// mounts/logEvents/diff — данные вспомогательных экранов (Task 5):
+	// заполняются синхронно в момент входа на экран клавишами M/L/D.
+	mounts    mountsModel
+	logEvents logModel
+	diff      diffModel
 }
 
 // deps возвращает границы отказа модели: явно заданные через options.Deps
@@ -159,6 +164,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateForm(msg)
 		case ScreenConfirmReload:
 			return m.updateConfirmReload(msg.String())
+		case ScreenMounts, ScreenLog, ScreenDiff:
+			return m.updateScrollable(msg)
 		default:
 			if msg.String() == "esc" {
 				m.screen = ScreenTable
@@ -183,6 +190,14 @@ func (m model) View() string {
 		return m.viewForm()
 	case ScreenSaveResult:
 		return m.viewSaveResult()
+	case ScreenDiff:
+		return m.viewDiff()
+	case ScreenMounts:
+		return m.viewMounts()
+	case ScreenLog:
+		return m.viewLog()
+	case ScreenHelp:
+		return m.viewHelp()
 	case ScreenConfirmReload:
 		return m.theme.Warning.Render(Tr(m.opts.Lang, "confirm_reload")) + "\n"
 	default:

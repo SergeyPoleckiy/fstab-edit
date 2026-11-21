@@ -89,9 +89,11 @@ func TestDeleteAndUndoFlow(t *testing.T) {
 		return strings.Contains(string(b), "/mnt/data")
 	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
 
-	// 'd' — delete: запись под курсором (первая) удалена, вторая осталась.
+	// Del — delete: запись под курсором (первая) удалена, вторая осталась.
+	// Клавиша 'd' с Task 5 открывает экран diff (Task 5), удаление — по ТЗ §5.2
+	// на Del; сценарий удаления/undo сохранён без изменений.
 	// Dirty-индикатор "*" появился в заголовке.
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	tm.Send(tea.KeyMsg{Type: tea.KeyDelete})
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
 		s := string(b)
 		return !strings.Contains(s, "UUID=aaa") && strings.Contains(s, "*")
