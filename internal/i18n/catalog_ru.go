@@ -67,7 +67,8 @@ var catalogRU = map[string]string{
 	// RU-значения дословно повторяют текущие строки cmd; EN — перевод.
 	// Имена флагов и enum-значения (table, json, csv, tsv, debug, ...) в
 	// usage не переводятся.
-	"help.root.short": "безопасное редактирование fstab с валидацией, backup и rollback", "help.cmd.add.short": "добавить новую запись fstab",
+	"help.root.short":             "безопасное редактирование fstab с валидацией, backup и rollback",
+	"help.cmd.add.short":          "добавить новую запись fstab",
 	"help.cmd.edit.short":         "изменить выбранные поля записи fstab",
 	"help.cmd.delete.short":       "удалить запись fstab",
 	"help.cmd.comment.short":      "закомментировать активную запись fstab",

@@ -434,7 +434,7 @@ func TestLookupHomeByEffectiveUID(t *testing.T) {
 	}
 }
 
-// TestLoadTUIColorsValid проверяет, что tui.colors со всеми двенадцатью
+// TestLoadTUIColorsValid проверяет, что tui.colors со всеми тринадцатью
 // ролями и всеми тремя форматами цвета (hex #rrggbb любого регистра, номер
 // ANSI 0–255, имя ANSI-цвета включая bright-варианты) принимается валидацией
 // и резолвится в Settings.TUIColors без изменений (имена не нормализуются:
