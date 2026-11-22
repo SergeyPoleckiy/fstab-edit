@@ -2,56 +2,80 @@
 
 [![CI](https://github.com/SergeyPoleckiy/fstab-edit/actions/workflows/ci.yml/badge.svg)](https://github.com/SergeyPoleckiy/fstab-edit/actions/workflows/ci.yml)
 
-Утилита для безопасного редактирования `/etc/fstab` в Linux: CLI для автоматизации и TUI для интерактивной работы — оба интерфейса реализованы. Основные свойства: транзакционная запись, статическая проверка файла-кандидата, резервные копии, rollback и побайтовое сохранение неизменённого содержимого.
+[Русский](README.ru.md)
 
-## Разработка с использованием ИИ
+A utility for safely editing `/etc/fstab` on Linux: a CLI for automation and a TUI for interactive work — both interfaces are implemented. Key properties: transactional writes, static validation of the candidate file, backups, rollback, and byte-for-byte preservation of unchanged content.
 
-Эта программа разрабатывается с использованием искусственного интеллекта **Kimi Code CLI от Moonshot AI (月之暗面)**. ИИ помогает проектировать архитектуру, писать код, тесты и документацию. Каждый реализованный блок проходит автоматизированные проверки и отдельный code review; требования и окончательные решения по проекту остаются за автором.
+## Table of Contents
 
-## Статус
+- [AI-assisted development](#ai-assisted-development)
+- [Status](#status)
+- [Installation](#installation)
+- [CLI](#cli)
+- [TUI](#tui)
+- [Configuration](#configuration)
+- [Logging](#logging)
+- [Localization](#localization)
+- [Project structure](#project-structure)
+- [Development safety](#development-safety)
+- [Requirements](#requirements)
+- [Checks](#checks)
+- [Security documentation](#security-documentation)
+- [Save transaction](#save-transaction)
+- [Backups and rotation](#backups-and-rotation)
+- [Project documentation](#project-documentation)
+- [License](#license)
 
-- Реализованы этапы **1–4**: **1 — ядро и CLI** (парсер, модель, редактор, валидатор, транзакция с rollback, backup, конфиг/журнал/i18n, 10 команд); **2 — TUI** (таблица, формы, undo, транзакционное сохранение, экраны diff/монтирований/устройств/журнала/истории/помощи); **3 — устройства и документация** (lsblk/blkid, автодополнение UUID/LABEL/типов ФС/опций, руководство пользователя с `make pdf`); **4 — полировка** (подсветка синтаксиса и severity, темы light/high-contrast, техдолг TUI, man-страница и `make install`). CLI собирается в статический бинарь `fstab-edit`; TUI (пакет `tui/`, команда `tui`) реализован: таблица записей, формы добавления/редактирования, undo, транзакционное сохранение с rollback-результатом, экраны diff/монтирований/блочных устройств/журнала/истории/помощи, автодополнение в форме, четыре встроенные темы. Полное руководство пользователя — [docs/user-guide.md](docs/user-guide.md) (PDF собирается целью `make pdf`).
-- Реализованы модель данных, lossless parser, selectors и in-memory mutations: Add, Edit, Delete, Comment и Uncomment, включая связанные comment blocks.
-- Реализованы публичная модель diagnostics и внутренний read-only validator: проверки полей, source/mount/FS type, опций, duplicates и специальные предупреждения работают детерминированно с документом в памяти.
-- Реализован secure runner: исполняемые файлы разрешаются только в фиксированных системных каталогах, аргументы передаются без shell, локаль фиксируется как `LC_ALL=C`. По умолчанию действуют timeout **10 секунд** и ограничение **64 KiB на каждый поток** stdout/stderr.
-- Реализованы `findmnt --verify --tab-file` и private candidate check. Содержимое кандидата записывается без нормализации и добавления newline в файл `0600` внутри временного каталога `0700`; после проверки предпринимается попытка `RemoveAll` при любом исходе. Ошибка удаления добавляет `findmnt.candidate_cleanup/warning`, сохраняя первичные diagnostics и `Execution.Err`. Внутренний validator и внешний отчёт объединяются в порядке internal → external.
-- Классификация вывода проверена на fixtures наблюдённого формата **util-linux 2.42.4**. `findmnt` только статически проверяет файл-кандидат и ничего не монтирует.
-- Raw stdout/stderr потенциально содержат sensitive-данные и не предназначены для записи в журнал без redaction; публичный `Report` содержит только обобщённые диагностики, а исходный вывод хранится отдельно в `Execution`.
-- Реализованы secure snapshot/base-hash conflict, стабильные flock и низкоуровневый атомарный `Replace` с сохранением metadata/xattrs. Реализованы backup и ротация: `Create`, `Open`, `List`, `Select` и `Rotate` в `internal/backup`.
-- Реализована доменная transaction в `internal/transaction`: internal validation, lock, повторный base SHA-256, `findmnt` candidate check, backup текущей операции, atomic replace, post-check, один automatic rollback и ротация после полного успеха.
-- Реализован CLI на Cobra (`cmd/`, `main.go`): десять команд `list`, `add`, `edit`, `delete`, `comment`, `uncomment`, `validate`, `verify-mount`, `backup`, `rollback`; dry-run, подтверждения `[y/N]`, unified diff, селекторы записей с кодом неоднозначности 8 и форматы вывода `table`/`json`/`csv`/`tsv` со `schema_version: 1`. Тесты CLI работают только с временными файлами, fake runner и scripted stdin; реальный `/etc/fstab` и findmnt не затрагиваются.
-- Реализованы YAML-конфигурация с приоритетами и security-checks (`internal/config`), структурный JSON Lines-журнал с rotation и redaction (`internal/logger`) и локализация RU/EN (`internal/i18n`); оба пакета подключены к CLI: настройки резолвятся до handler'ов, журнал открывается до любой мутации и фиксирует исход операций. Команда `tui` открывает полноценный TUI-редактор (см. раздел «TUI» ниже).
-- Актуальная основа разработки: [ТЗ версии 2.0](docs/spec/fstab-editor-v2.md).
-- Исходная редакция сохранена: [ТЗ версии 1.0](docs/spec/fstab-editor.md).
+## AI-assisted development
 
-## Установка
+This program is developed with the help of artificial intelligence — **Kimi Code CLI by Moonshot AI (月之暗面)**. The AI assists in designing the architecture and writing code, tests, and documentation. Every implemented block passes automated checks and a separate code review; requirements and final project decisions remain with the author.
 
-Для сборки из исходников требуется **Go ≥ 1.22** и `make` (модуль не имеет внешних зависимостей кроме зафиксированных в `go.mod`; бинарь собирается статически). Версия подставляется автоматически из git (`git describe --tags`): сборка из тега `v1.0` даёт версию `v1.0`, из коммитов после тега — `v1.0-N-g<хеш>`, из нетегированного дерева — сокращённый хеш коммита:
+## Status
+
+- Stages **1–4** are implemented: **1 — core and CLI** (parser, model, editor, validator, transaction with rollback, backup, config/logging/i18n, 10 commands); **2 — TUI** (table, forms, undo, transactional save, diff/mounts/devices/log/history/help screens); **3 — devices and documentation** (lsblk/blkid, UUID/LABEL/FS-type/option completion, user guide with `make pdf`); **4 — polish** (syntax and severity highlighting, light/high-contrast themes, TUI tech debt, man page and `make install`). The CLI builds into a static `fstab-edit` binary; the TUI (package `tui/`, the `tui` command) is implemented: entry table, add/edit forms, undo, transactional save with a rollback result, diff/mounts/block-devices/log/history/help screens, in-form completion, four built-in themes. The full user guide is [docs/user-guide.en.md](docs/user-guide.en.md) (PDFs are built by `make pdf`).
+- The data model, lossless parser, selectors, and in-memory mutations are implemented: Add, Edit, Delete, Comment and Uncomment, including associated comment blocks.
+- The public diagnostics model and the internal read-only validator are implemented: field, source/mount/FS-type, option, duplicate, and special-warning checks run deterministically against the in-memory document.
+- A secure runner is implemented: executables are resolved only in fixed system directories, arguments are passed without a shell, and the locale is pinned to `LC_ALL=C`. By default a **10 second** timeout and a **64 KiB limit per stream** of stdout/stderr apply.
+- `findmnt --verify --tab-file` and a private candidate check are implemented. The candidate content is written without normalization or added newline to a `0600` file inside a `0700` temporary directory; a `RemoveAll` attempt follows on every outcome. A cleanup failure adds `findmnt.candidate_cleanup/warning` while preserving the primary diagnostics and `Execution.Err`. The internal validator and the external report are merged in internal → external order.
+- Output classification is verified against fixtures of the observed **util-linux 2.42.4** format. `findmnt` only statically checks the candidate file and never mounts anything.
+- Raw stdout/stderr may contain sensitive data and are not meant to be written to the log without redaction; the public `Report` contains only generalized diagnostics, while the raw output is kept separately in `Execution`.
+- Secure snapshot/base-hash conflict handling, stable flock, and the low-level atomic `Replace` with metadata/xattr preservation are implemented. Backups and rotation are implemented: `Create`, `Open`, `List`, `Select`, and `Rotate` in `internal/backup`.
+- The domain transaction is implemented in `internal/transaction`: internal validation, lock, re-check of the base SHA-256, `findmnt` candidate check, backup of the current operation, atomic replace, post-check, a single automatic rollback, and rotation after full success.
+- The CLI is implemented on Cobra (`cmd/`, `main.go`): ten commands — `list`, `add`, `edit`, `delete`, `comment`, `uncomment`, `validate`, `verify-mount`, `backup`, `rollback`; dry-run, `[y/N]` confirmations, unified diff, entry selectors with ambiguity code 8, and `table`/`json`/`csv`/`tsv` output formats with `schema_version: 1`. CLI tests work only with temporary files, a fake runner, and scripted stdin; the real `/etc/fstab` and findmnt are never touched.
+- YAML configuration with priorities and security checks (`internal/config`), structured JSON Lines logging with rotation and redaction (`internal/logger`), and RU/EN localization (`internal/i18n`) are implemented; both packages are wired into the CLI: settings are resolved before handlers, and the log is opened before any mutation and records the outcome of operations. The `tui` command opens the full TUI editor (see the "TUI" section below).
+- The current development baseline: [Specification v2.0](docs/spec/fstab-editor-v2.md).
+- The original edition is preserved: [Specification v1.0](docs/spec/fstab-editor.md).
+
+## Installation
+
+Building from source requires **Go ≥ 1.22** and `make` (the module has no external dependencies beyond those pinned in `go.mod`; the binary builds statically). The version is derived automatically from git (`git describe --tags`): building from tag `v1.0` yields version `v1.0`, from commits after the tag — `v1.0-N-g<hash>`, from an untagged tree — the short commit hash:
 
 ```bash
 git clone https://github.com/SergeyPoleckiy/fstab-edit.git
 cd fstab-edit
-make            # собирает ./fstab-edit
-make install    # сборка + установка в /usr/local (нужен root)
+make            # builds ./fstab-edit
+make install    # build + install to /usr/local (requires root)
 ```
 
-Установка `sudo make install` копирует статический бинарь в `/usr/local/bin`
-и man-страницу `fstab-edit(1)` в `/usr/local/share/man/man1` (в архиве gzip);
-после установки справка доступна через `man fstab-edit`. Базовый каталог
-меняется переменной `PREFIX`, staging-каталог для сборки пакетов —
-`DESTDIR` (например, `make install DESTDIR=/tmp/stage PREFIX=/usr`).
+`sudo make install` copies the static binary to `/usr/local/bin`
+and the `fstab-edit(1)` man page to `/usr/local/share/man/man1` (gzipped,
+as customary in distributions; the Russian version goes to
+`/usr/local/share/man/ru/man1`);
+after installation, help is available via `man fstab-edit`. The base directory
+is changed with the `PREFIX` variable, and `DESTDIR` is a staging directory
+for package builds (e.g. `make install DESTDIR=/tmp/stage PREFIX=/usr`).
 
-Удаление — обратная операция, удаляет те же файлы:
+Uninstallation is the reverse operation, removing the same files:
 
 ```bash
 sudo make uninstall
 ```
 
-После установки опционально можно создать конфиг `/etc/fstab-edit/config.yaml` (см. раздел «Конфигурация» ниже). Файл журнала `/var/log/fstab-edit.log` создаётся автоматически при первой мутирующей операции; если журнал недоступен, мутация блокируется (exit code 3 или 6).
+After installation you can optionally create `/etc/fstab-edit/config.yaml` (see the "Configuration" section below). The log file `/var/log/fstab-edit.log` is created automatically on the first mutating operation; if the log is unavailable, the mutation is blocked (exit code 3 or 6).
 
 ## CLI
 
-Сборка и справка:
+Build and help:
 
 ```bash
 go build -o fstab-edit .
@@ -59,89 +83,89 @@ go build -o fstab-edit .
 ./fstab-edit --version
 ```
 
-По умолчанию целевой файл — `/etc/fstab`; флаг `--file=<path>` переопределяет его (удобно для chroot и тестов). Флаги `--help` и `--version` не читают target и не запускают `findmnt`.
+The default target file is `/etc/fstab`; the `--file=<path>` flag overrides it (handy for chroots and tests). The `--help` and `--version` flags do not read the target and do not run `findmnt`.
 
-Команды:
+Commands:
 
-| Команда | Назначение |
-|---------|-----------|
-| `list` | Показывает активные и закомментированные записи |
-| `add` | Добавляет новую запись |
-| `edit` | Изменяет выбранные поля/comment |
-| `delete` | Удаляет запись |
-| `comment` | Комментирует активную запись |
-| `uncomment` | Включает закомментированную запись |
-| `validate` | Проверяет документ (`--offline` — только внутренний validator) |
-| `verify-mount` | Статический `findmnt --verify` по фактическим байтам target |
-| `backup` | Создаёт ручную копию без изменения target |
-| `rollback` | Восстанавливает выбранную копию |
-| `tui` | Открывает интерактивный TUI-редактор (см. раздел «TUI») |
+| Command | Purpose |
+|---------|---------|
+| `list` | Show active and commented-out entries |
+| `add` | Add a new entry |
+| `edit` | Modify selected fields/comment |
+| `delete` | Delete an entry |
+| `comment` | Comment out an active entry |
+| `uncomment` | Enable a commented-out entry |
+| `validate` | Check the document (`--offline` — internal validator only) |
+| `verify-mount` | Static `findmnt --verify` against the actual bytes of the target |
+| `backup` | Create a manual copy without modifying the target |
+| `rollback` | Restore a selected copy |
+| `tui` | Open the interactive TUI editor (see the "TUI" section) |
 
-Селектор записи — позиционный `<id>` (номер строки, mount point или source) либо ровно один из `--line`, `--mount-point`, `--device`; несколько совпадений дают exit code **8** со списком кандидатов. `add` требует `--device`, `--mount`, `--type`, `--options` (dump/pass по умолчанию `0`); `edit` требует селектор и хотя бы один изменяющий флаг.
+An entry selector is a positional `<id>` (line number, mount point, or source) or exactly one of `--line`, `--mount-point`, `--device`; multiple matches yield exit code **8** with a list of candidates. `add` requires `--device`, `--mount`, `--type`, `--options` (dump/pass default to `0`); `edit` requires a selector and at least one modifying flag.
 
-Подтверждение `[y/N]` (по умолчанию отказ) обязательно для мутаций и `rollback`: без TTY требуется `--yes`, при этом `--yes` не обходит ошибки валидации, неоднозначность селектора и внешние сбои. Интерактивный diff и warning-preview печатаются в stderr только в prompt-режиме: `--yes` пропускает prompt целиком и ничего не печатает, а diff и diagnostics остаются доступными в полях machine-JSON (`diff`, `diagnostics`). `--dry-run` показывает diff и diagnostics, ничего не меняя и не требуя `--yes`.
+A `[y/N]` confirmation (default: no) is mandatory for mutations and `rollback`: without a TTY, `--yes` is required, and `--yes` does not bypass validation errors, selector ambiguity, or external failures. The interactive diff and warning preview are printed to stderr only in prompt mode: `--yes` skips the prompt entirely and prints nothing, while the diff and diagnostics remain available in the machine-JSON fields (`diff`, `diagnostics`). `--dry-run` shows the diff and diagnostics without changing anything and without requiring `--yes`.
 
-Форматы вывода `--output=table|json|csv|tsv`; JSON — `schema_version: 1`. Обычные данные — stdout (ровно один structured document для machine-форматов), диагностика, diff и prompts — stderr. Exit codes: 0 успех (warnings допустимы), 1 validation, 2 usage, 3 недостаток прав (небезопасный config, недоступный журнал), 4 lock/base conflict, 5 внешняя утилита, 6 I/O/backup/write, 7 критический rollback (наивысший приоритет), 8 неоднозначный селектор.
+Output formats `--output=table|json|csv|tsv`; JSON uses `schema_version: 1`. Normal data goes to stdout (exactly one structured document for machine formats); diagnostics, diffs, and prompts go to stderr. Exit codes: 0 success (warnings allowed), 1 validation, 2 usage, 3 insufficient privileges (unsafe config, unavailable log), 4 lock/base conflict, 5 external utility, 6 I/O/backup/write, 7 critical rollback (highest priority), 8 ambiguous selector.
 
 ## TUI
 
-Интерактивный редактор (`fstab-edit tui` или просто `fstab-edit` без аргументов) открывает таблицу записей target. Требуется интерактивный терминал (TTY): без него команда завершается usage error (exit 2) с сообщением `tui.no_tty`. Запуск без аргументов подменяется на `tui` только при пустом argv — `--help`, `--version` и остальные команды работают как раньше.
+The interactive editor (`fstab-edit tui`, or just `fstab-edit` with no arguments) opens a table of the target's entries. An interactive terminal (TTY) is required: without one the command exits with a usage error (exit 2) and the `tui.no_tty` message. The no-argument launch is rewritten to `tui` only with an empty argv — `--help`, `--version`, and the other commands behave as before.
 
-Основные клавиши (главный экран):
+Main keys (main screen):
 
-| Клавиша | Действие |
-|---------|----------|
-| `↑`/`↓`, `k`/`j` | Перемещение курсора |
-| `Enter` | Редактировать запись под курсором |
-| `Ins`, `i` | Добавить запись |
-| `Del` | Удалить запись под курсором |
-| `c` | Закомментировать/раскомментировать запись под курсором |
-| `d` | Diff несохранённых изменений |
-| `M`, `m` | Статус монтирований (findmnt) |
-| `B`, `b` | Блочные устройства (lsblk) |
-| `H`, `h` | История резервных копий |
-| `L`, `l` | Журнал операций |
-| `F1` или `?` | Помощь |
-| `Ctrl+Z` | Отменить последнее действие |
-| `F5` | Перезагрузить target (при несохранённых изменениях — подтверждение) |
-| `Ctrl+S`/`F2` | Сохранить через transaction (backup → findmnt → atomic replace) |
-| `q`/`Ctrl+Q`/`Ctrl+C`/`F10` | Выход (при несохранённых изменениях запрашивается подтверждение [y/N], default No) |
+| Key | Action |
+|-----|--------|
+| `↑`/`↓`, `k`/`j` | Move the cursor |
+| `Enter` | Edit the entry under the cursor |
+| `Ins`, `i` | Add an entry |
+| `Del` | Delete the entry under the cursor |
+| `c` | Comment/uncomment the entry under the cursor |
+| `d` | Diff of unsaved changes |
+| `M`, `m` | Mount status (findmnt) |
+| `B`, `b` | Block devices (lsblk) |
+| `H`, `h` | Backup history |
+| `L`, `l` | Operation log |
+| `F1` or `?` | Help |
+| `Ctrl+Z` | Undo the last action |
+| `F5` | Reload the target (asks for confirmation if there are unsaved changes) |
+| `Ctrl+S`/`F2` | Save via transaction (backup → findmnt → atomic replace) |
+| `q`/`Ctrl+Q`/`Ctrl+C`/`F10` | Quit (asks for confirmation [y/N] if there are unsaved changes, default No) |
 
-Экраны истории (`H`) поддерживают `d` (diff копии против target) и `r` (restore копии через доменный rollback с safety backup). Экран устройств (`B`) показывает плоский список `lsblk` (PATH, TYPE, FSTYPE, SIZE, MOUNTPOINT, LABEL, UUID) и обновляется при каждом входе. Сохранение и восстановление идут через те же transaction/rollback-механизмы, что и CLI: отдельной небезопасной реализации записи в TUI нет.
+The history screens (`H`) support `d` (diff a copy against the target) and `r` (restore a copy via the domain rollback with a safety backup). The devices screen (`B`) shows a flat `lsblk` list (PATH, TYPE, FSTYPE, SIZE, MOUNTPOINT, LABEL, UUID) and refreshes on every entry. Saving and restoring go through the same transaction/rollback mechanisms as the CLI: there is no separate unsafe write implementation in the TUI.
 
-Форма записи (Ins/Enter) поддерживает автодополнение (ТЗ §5.3): панель подсказок фильтруется по префиксу для полей «Тип ФС» и «Опции», а поле «Устройство» показывает все устройства без фильтрации; `Ctrl+N`/`Ctrl+P` листают варианты и подставляют выбранный в поле. Для устройств подставляемое значение выбирается по приоритету `UUID=` → `PARTUUID=` → `LABEL=` → `PARTLABEL=` → `/dev/...` (устойчиво к переименованию дисков), список берётся из `lsblk`; если выбранный идентификатор не уникален (повторяется у нескольких устройств), подсказка помечается «(не уникальный идентификатор)». При недоступности `lsblk` форма работает без подсказок устройств. Набор опций зависит от типа ФС (бессмысленные сочетания, например `discard` для сетевых ФС, исключаются).
+The entry form (Ins/Enter) supports completion: the hint panel filters by prefix for the "FS type" and "Options" fields, while the "Device" field shows all devices without filtering; `Ctrl+N`/`Ctrl+P` cycle through the suggestions and insert the selected one into the field. For devices, the inserted value is chosen by priority `UUID=` → `PARTUUID=` → `LABEL=` → `PARTLABEL=` → `/dev/...` (stable against disk renaming); the list comes from `lsblk`; if the selected identifier is not unique (shared by several devices), the hint is marked "(non-unique identifier)". If `lsblk` is unavailable, the form works without device hints. The set of options depends on the FS type (meaningless combinations, e.g. `discard` for network filesystems, are excluded).
 
-Тема оформления — `tui.theme` в конфигурации: `dark` (по умолчанию), `light`, `high-contrast` (усиленная контрастность для плохого зрения/проектора) или `monochrome`; неизвестное значение отклоняется ошибкой конфигурации (exit code 2). Поверх любой встроенной темы (включая `monochrome`) действует опциональный `tui.colors` — переопределение цветов семантических ролей палитры (hex `#rrggbb`, номер ANSI `0`–`255` или имя ANSI-цвета `black`…`bright_white`; роли `title`, `header`, `selected_fg`/`selected_bg`, `muted`, `info`, `dirty`, `error`, `warning`, `field_source`, `field_mount`, `field_fstype`, `field_options`); неизвестная роль или невалидный формат — отказ конфигурации (exit code 2). Подробности и пример — в руководстве §5.7. Ошибки и предупреждения помечаются текстовыми маркерами (`!`, `?`) во всех темах. Язык интерфейса — общий резолв `--lang`/`FSTAB_EDIT_LANG`/локаль.
+The color theme is `tui.theme` in the configuration: `dark` (default), `light`, `high-contrast` (extra contrast for poor vision/projectors), or `monochrome`; an unknown value is rejected with a configuration error (exit code 2). On top of any built-in theme (including `monochrome`), the optional `tui.colors` applies — overriding the colors of semantic palette roles (hex `#rrggbb`, ANSI number `0`–`255`, or ANSI color name `black`…`bright_white`; roles: `title`, `header`, `selected_fg`/`selected_bg`, `muted`, `info`, `dirty`, `error`, `warning`, `field_source`, `field_mount`, `field_fstype`, `field_options`); an unknown role or an invalid format is rejected with a configuration error (exit code 2). Details and an example are in the user guide §5.7. Errors and warnings are marked with textual markers (`!`, `?`) in all themes. The interface language is resolved via the common `--lang`/`FSTAB_EDIT_LANG`/locale chain.
 
-Ограничения: мышь не поддерживается (только клавиатура). Отложено на будущее: английская версия руководства пользователя, описания назначения опций в подсказках формы, пакеты .deb/.rpm/.pkg.tar.zst. Документация пользователя: [docs/user-guide.md](docs/user-guide.md); PDF-версия собирается командой `make pdf` (pandoc + xelatex).
+Limitations: the mouse is not supported (keyboard only). Deferred for the future: option-purpose descriptions in form hints, .deb/.rpm/.pkg.tar.zst packages. User documentation: [docs/user-guide.en.md](docs/user-guide.en.md) (English) and [docs/user-guide.md](docs/user-guide.md) (Russian); PDF versions are built with `make pdf` (pandoc + xelatex).
 
-## Конфигурация
+## Configuration
 
-Настройки резолвятся по приоритету ТЗ §13.1: **CLI-флаги > `FSTAB_EDIT_*` env > user YAML > system YAML > defaults**. CLI-флаг применяется только при явном `--flag` (Cobra `Changed`), иначе значение берётся из нижележащего уровня.
+Settings are resolved by the priority from spec §13.1: **CLI flags > `FSTAB_EDIT_*` env > user YAML > system YAML > defaults**. A CLI flag applies only when explicitly passed (Cobra `Changed`); otherwise the value is taken from the underlying level.
 
-- Пути автоматической загрузки: system — `/etc/fstab-edit/config.yaml` (требует root-ownership), user — `~/.config/fstab-edit/config.yaml`. Root-процесс (euid 0) user-config автоматически не загружает (ТЗ §13.2).
-- `--config <path>` задаёт явный YAML вместо system/user; env всё равно выше его.
-- Env-переменные: `FSTAB_EDIT_FILE`, `FSTAB_EDIT_BACKUP_DIR`, `FSTAB_EDIT_LOG_LEVEL`, `FSTAB_EDIT_LANG`, `FSTAB_EDIT_OUTPUT`. Неизвестные `FSTAB_EDIT_*` печатают `warning: ...` в stderr и игнорируются.
-- YAML-схема (ТЗ §13.3): `fstab_path`, `backup.dir|prefix|keep`, `log.file|level|max_size_mb|keep`, `tui.theme`, `tui.colors`. Язык и формат вывода из YAML не читаются (только env/CLI). Ключ `tui.theme` задаёт оформление TUI (`dark` — по умолчанию, `light`, `high-contrast`, `monochrome`); `tui.colors` — опциональные переопределения цветов ролей палитры поверх темы (см. раздел про TUI выше).
-- Security-checks (ТЗ §13.2): symlink-конфигурация отклоняется, файл не должен быть group/others-writable (иначе exit code 3), system-config обязан принадлежать root, user/explicit — effective UID. Некорректный YAML или значения — exit code 2.
+- Automatic load paths: system — `/etc/fstab-edit/config.yaml` (requires root ownership), user — `~/.config/fstab-edit/config.yaml`. A root process (euid 0) does not automatically load the user config (spec §13.2).
+- `--config <path>` sets an explicit YAML instead of system/user; env still takes precedence over it.
+- Env variables: `FSTAB_EDIT_FILE`, `FSTAB_EDIT_BACKUP_DIR`, `FSTAB_EDIT_LOG_LEVEL`, `FSTAB_EDIT_LANG`, `FSTAB_EDIT_OUTPUT`. Unknown `FSTAB_EDIT_*` variables print `warning: ...` to stderr and are ignored.
+- YAML schema (spec §13.3): `fstab_path`, `backup.dir|prefix|keep`, `log.file|level|max_size_mb|keep`, `tui.theme`, `tui.colors`. Language and output format are not read from YAML (env/CLI only). The `tui.theme` key sets the TUI appearance (`dark` — default, `light`, `high-contrast`, `monochrome`); `tui.colors` — optional palette role color overrides on top of the theme (see the TUI section above).
+- Security checks (spec §13.2): a symlinked configuration is rejected, the file must not be group/others-writable (otherwise exit code 3), the system config must be owned by root, user/explicit — by the effective UID. Malformed YAML or values — exit code 2.
 
-## Журналирование
+## Logging
 
-Файловый журнал — JSON Lines, по умолчанию `/var/log/fstab-edit.log` (права `0600`).
+The file log is JSON Lines, by default `/var/log/fstab-edit.log` (mode `0600`).
 
-- Событие — одна JSON-строка: `severity`, `timestamp` (RFC 3339 UTC), `real_uid`/`effective_uid`, `sudo_user`/`sudo_uid` (только при числовом `SUDO_UID`), `operation` (`add`, `edit`, `delete`, `comment`, `uncomment`, `backup`, `rollback`), `target`, `backup_id`, `result` (`success`/`error`/`cancelled`), `error_code`, `duration_ms`, `old_value`/`new_value`. Коды и поля не локализуются.
-- Журнал открывается **до** любой мутации (`add`/`edit`/`delete`/`comment`/`uncomment`/`rollback`/`backup`): недоступный журнал блокирует изменение target кодом 3 (нет прав) или 6 (прочий I/O) — backup/lock/write не начинаются. Сбой записи после успешного replace игнорируется и не мешает обязательному rollback.
-- Read-only команды (`list`, `validate`, `verify-mount`) и `--dry-run` файловый журнал не создают вовсе. TUI не открывает журнал при старте: журнал открывается внутри транзакции сохранения, поэтому недоступный журнал блокирует именно сохранение.
-- Rotation: при превышении `log.max_size_mb` (default 10 MiB) текущий файл уходит в `<file>.1`, архивы сдвигаются до `log.keep` (default 5).
-- Redaction: `old_value`/`new_value` (изменённые строки diff) проходят маскировку секретов — `password=`, `credentials=`, `token=`, userinfo URL и др. заменяются на `***`.
+- An event is a single JSON line: `severity`, `timestamp` (RFC 3339 UTC), `real_uid`/`effective_uid`, `sudo_user`/`sudo_uid` (only with a numeric `SUDO_UID`), `operation` (`add`, `edit`, `delete`, `comment`, `uncomment`, `backup`, `rollback`), `target`, `backup_id`, `result` (`success`/`error`/`cancelled`), `error_code`, `duration_ms`, `old_value`/`new_value`. Codes and fields are not localized.
+- The log is opened **before** any mutation (`add`/`edit`/`delete`/`comment`/`uncomment`/`rollback`/`backup`): an unavailable log blocks the change to the target with code 3 (no privileges) or 6 (other I/O) — backup/lock/write never start. A write failure after a successful replace is ignored and does not prevent the mandatory rollback.
+- Read-only commands (`list`, `validate`, `verify-mount`) and `--dry-run` do not create the file log at all. The TUI does not open the log at startup: the log is opened inside the save transaction, so an unavailable log blocks exactly the save.
+- Rotation: when `log.max_size_mb` (default 10 MiB) is exceeded, the current file becomes `<file>.1`, and archives shift up to `log.keep` (default 5).
+- Redaction: `old_value`/`new_value` (changed diff lines) are masked — `password=`, `credentials=`, `token=`, URL userinfo, etc. are replaced with `***`.
 
-## Локализация
+## Localization
 
-Язык сообщений выбирается по приоритету ТЗ §15: `--lang` > `FSTAB_EDIT_LANG` > `LC_ALL` > `LANG` > русский (default). Поддерживаются `ru` и `en`; переводятся help-тексты, usage флагов, диагностика ошибок и prompt-подтверждения. Формы ответа «да»: ru — `д`, `да`, `y`, `yes`; en — `y`, `yes`; любой иной ответ и пустая строка — отказ (default No).
+The message language is selected by the priority from spec §15: `--lang` > `FSTAB_EDIT_LANG` > `LC_ALL` > `LANG` > Russian (default). `ru` and `en` are supported; help texts, flag usage, error diagnostics, and prompt confirmations are translated. "Yes" answers: ru — `д`, `да`, `y`, `yes`; en — `y`, `yes`; any other answer and an empty line mean refusal (default No).
 
-Ограничения перевода: доменные диагностики валидатора (`models.Diagnostic.Message` — русские строки нижележащего слоя) и Cause-цепочки ошибок нижних уровней не переводятся; системные сообщения Cobra о неизвестном флаге (unknown flag) выводятся как есть.
+Translation limitations: validator domain diagnostics (`models.Diagnostic.Message` — Russian strings of the lower layer) and error cause chains of lower levels are not translated; Cobra's system messages about an unknown flag are printed as-is.
 
-Примеры:
+Examples:
 
 ```bash
 fstab-edit list
@@ -164,56 +188,58 @@ fstab-edit rollback --dry-run
 fstab-edit rollback --restore=2026-11-18_15-30-45.123456789Z
 ```
 
-Тесты CLI не используют реальный `/etc/fstab`: все сценарии работают с временными файлами, fake runner и scripted stdin.
+CLI tests do not use the real `/etc/fstab`: all scenarios work with temporary files, a fake runner, and scripted stdin.
 
-## Структура проекта
+## Project structure
 
 ```text
 fstab-edit/
-├── cmd/                  # Команды Cobra: флаги, prompt, exit mapping
-├── main.go               # Production wiring процессовых зависимостей
+├── cmd/                  # Cobra commands: flags, prompt, exit mapping
+├── main.go               # Production wiring of process dependencies
 ├── internal/
-│   ├── cliapp/           # Доменный слой CLI: selectors, preview, service, rollback
-│   ├── diff/             # Line-based unified diff для preview
-│   ├── output/           # Renderers table/json/csv/tsv, schema v1
-│   ├── parser/           # Lossless parser и побайтовое сохранение
-│   ├── editor/           # Selectors и in-memory mutations
-│   ├── validator/        # Синтаксическая и семантическая проверка
-│   ├── writer/           # Блокировки, контроль версии и атомарная запись
-│   ├── backup/           # Backup, метаданные, выбор и ротация
-│   ├── transaction/      # Доменная оркестрация записи и automatic rollback
-│   ├── config/           # YAML-конфигурация и приоритеты
-│   ├── logger/           # Структурный журнал
-│   ├── i18n/             # Локализация RU/EN
-│   └── sysutil/          # Безопасный запуск внешних утилит
+│   ├── cliapp/           # CLI domain layer: selectors, preview, service, rollback
+│   ├── diff/             # Line-based unified diff for preview
+│   ├── output/           # table/json/csv/tsv renderers, schema v1
+│   ├── parser/           # Lossless parser and byte-for-byte preservation
+│   ├── editor/           # Selectors and in-memory mutations
+│   ├── validator/        # Syntactic and semantic checks
+│   ├── writer/           # Locks, version control, atomic write
+│   ├── backup/           # Backup, metadata, selection and rotation
+│   ├── transaction/      # Domain write orchestration and automatic rollback
+│   ├── config/           # YAML configuration and priorities
+│   ├── logger/           # Structured log
+│   ├── i18n/             # RU/EN localization
+│   └── sysutil/          # Secure launching of external utilities
 ├── pkg/
-│   └── models/           # Публичные модели данных
-├── tui/                  # TUI-интерфейс
-├── docs/                 # Документация: user-guide.md, DEVELOPMENT.md, spec/ (ТЗ), man/
-├── examples/             # Примеры конфигурации (config-minimal.yaml, config-full.yaml)
-├── AGENTS.md             # Правила проекта для AI-агентов (архитектура, workflow)
-├── CHANGELOG.md          # История изменений (Keep a Changelog)
+│   └── models/           # Public data models
+├── tui/                  # TUI interface
+├── docs/                 # Documentation: user-guide.en.md (EN), user-guide.md (RU),
+│                         # DEVELOPMENT.md, spec/, man/ (EN + RU)
+├── examples/             # Configuration examples (config-minimal.yaml, config-full.yaml)
+├── AGENTS.md             # Project rules for AI agents (architecture, workflow)
+├── CHANGELOG.md          # Changelog (Keep a Changelog)
 ├── Makefile              # build/install/uninstall/test/pdf/version
-├── LICENSE.en            # Лицензия MIT, английский текст
-├── LICENSE.ru            # Неофициальный перевод лицензии MIT
-└── README.md             # Этот файл
+├── LICENSE.en            # MIT license, English text
+├── LICENSE.ru            # Unofficial Russian translation of the MIT license
+├── README.md             # This file — project overview in English (primary)
+└── README.ru.md          # Project overview in Russian
 ```
 
-## Безопасность при разработке
+## Development safety
 
-Никогда не используйте реальный `/etc/fstab` основной системы для разработки и ручных экспериментов. Тесты findmnt используют fake runner и не запускают внешнюю утилиту; candidate tests работают только с приватными временными файлами; CLI- и файловые тесты используют временные файлы и опцию `--file`; разрушительные и привилегированные проверки выполняются только в изолированных VM.
+Never use the real `/etc/fstab` of the host system for development or manual experiments. findmnt tests use a fake runner and never launch the external utility; candidate tests work only with private temporary files; CLI and file tests use temporary files and the `--file` option; destructive and privileged checks run only in isolated VMs.
 
-## Требования
+## Requirements
 
-- Go 1.22 или новее.
+- Go 1.22 or newer.
 - Linux.
-- Для обычных тестов root не требуется.
-- `findmnt` обязателен для проверки перед сохранением.
-- `lsblk` используется экраном устройств (`B`) и автодополнением формы; без него TUI работает без подсказок устройств.
-- `blkid` используется для расширенных свойств устройств (опционально).
-- `golangci-lint` используется для локальной проверки и CI.
+- Regular tests do not require root.
+- `findmnt` is mandatory for the pre-save check.
+- `lsblk` is used by the devices screen (`B`) and form completion; without it the TUI works without device hints.
+- `blkid` is used for extended device properties (optional).
+- `golangci-lint` is used for local checks and CI.
 
-## Проверки
+## Checks
 
 ```bash
 go test ./... -v
@@ -223,51 +249,52 @@ go vet ./...
 golangci-lint run
 ```
 
-## Документация по безопасности
+## Security documentation
 
-Текущие гарантии низкоуровневого writer:
+Current guarantees of the low-level writer:
 
-1. `ReadSnapshot` читает точные байты только из безопасно открытого regular-file descriptor. `VerifyBaseHash` повторно читает target и обнаруживает внешнее изменение по SHA-256, даже если size и mtime не изменились; read-only API не создают lock.
-2. Lock создаётся только явным `AcquireLock` в отдельном стабильном файле, имя которого содержит SHA-256 canonical target. Проверяются владелец и modes каталога `0700` и файла `0600`; используются защищённые system/XDG/cache-каталоги. Стандартный timeout ожидания — **10 секунд**. Библиотека не удерживает lock во время prompt: его lifetime принадлежит будущей transaction.
-3. `Replace` записывает candidate в temp `0600` в parent directory, затем строго выполняет `fchown` → `fchmod` → копирование xattrs через descriptors → file sync → file close → rename → directory sync → повторное чтение и проверку SHA-256. До успешного rename ошибка оставляет target старым и запускает cleanup temp; cleanup errors присоединяются через `errors.Join` без потери первичной причины.
-4. UID/GID, permission bits и доступные xattrs, включая zero-length values, сохраняются. Ошибка чтения или установки конкретного security xattr запрещает replace. SELinux/AppArmor policy не изменяется; enforcing VM test остаётся отдельной release-проверкой и не считается выполненным на обычной temp FS.
-5. Ошибка directory sync или post-rename verification возвращается с `ReplaceResult.Replaced=true`. Низкоуровневый writer сам не выполняет automatic rollback: доменная transaction при `err != nil && result.Replaced` восстанавливает backup текущей операции. При `Replaced=false` target считается неизменённым.
+1. `ReadSnapshot` reads the exact bytes only from a safely opened regular-file descriptor. `VerifyBaseHash` re-reads the target and detects external changes by SHA-256, even if size and mtime are unchanged; read-only APIs do not create a lock.
+2. A lock is created only by an explicit `AcquireLock` in a separate stable file whose name contains the SHA-256 of the canonical target. The owner and modes are checked: directory `0700`, file `0600`; protected system/XDG/cache directories are used. The standard wait timeout is **10 seconds**. The library does not hold the lock during a prompt: its lifetime belongs to the future transaction.
+3. `Replace` writes the candidate to a temp `0600` file in the parent directory, then strictly performs `fchown` → `fchmod` → xattr copying via descriptors → file sync → file close → rename → directory sync → re-read and SHA-256 verification. Before a successful rename, an error leaves the target old and triggers temp cleanup; cleanup errors are attached via `errors.Join` without losing the primary cause.
+4. UID/GID, permission bits, and available xattrs, including zero-length values, are preserved. A failure to read or set a specific security xattr forbids the replace. SELinux/AppArmor policy is not changed; the enforcing VM test remains a separate release check and is not considered satisfied on a regular temp FS.
+5. A directory sync or post-rename verification error is returned with `ReplaceResult.Replaced=true`. The low-level writer itself does not perform an automatic rollback: the domain transaction restores the backup of the current operation when `err != nil && result.Replaced`. With `Replaced=false`, the target is considered unchanged.
 
-## Транзакция сохранения
+## Save transaction
 
-Гарантии `internal/transaction.Execute`:
+Guarantees of `internal/transaction.Execute`:
 
-1. No-op candidate, байтово равный target, завершается до lock, validation, backup, `findmnt` и write с `Changed=false`; внутренние ошибки candidate запрещают lock и изменения.
-2. Lock удерживается от повторного чтения target и base SHA-256 через backup, atomic replace, post-check, возможный rollback и разрешённую после успеха rotation. Внешнее изменение target запрещает backup/write и завершается классом `conflict`.
-3. Backup создаётся только из snapshot, повторно прочитанного под lock, и заново проверяется через `backup.Open` до replace.
-4. Post-write warnings допустимы; errors вызывают ровно одну попытку restore backup именно текущей transaction. `Replaced=false` никогда не вызывает rollback.
-5. Успешный rollback возвращает primary error с `RolledBack=true`. Rollback failure возвращает класс `rollback`, сохраняет primary и rollback causes и recovery paths target/backup/metadata.
-6. Rotation выполняется только после полного успешного post-check; backup текущей transaction передаётся protected. Ошибка rotation возвращает класс `rotation_after_success`, но не откатывает уже успешно записанный target.
-7. CLI, prompt, diff rendering, dry-run и manual rollback подключены в `cmd/` и `main.go`; config/logger/i18n подключены к pipeline CLI: настройки резолвятся в `PersistentPreRunE`, журнал открывается до мутации и фиксирует исход операций с redaction секретов. Transaction возвращает typed `FailureKind`, который CLI отображает на стабильные exit codes.
+1. A no-op candidate, byte-equal to the target, completes before lock, validation, backup, `findmnt`, and write with `Changed=false`; internal candidate errors forbid the lock and the changes.
+2. The lock is held from re-reading the target and the base SHA-256 through backup, atomic replace, post-check, a possible rollback, and the rotation allowed after success. An external change to the target forbids backup/write and completes with the `conflict` class.
+3. A backup is created only from a snapshot re-read under the lock and is re-verified via `backup.Open` before the replace.
+4. Post-write warnings are acceptable; errors trigger exactly one attempt to restore the backup of the current transaction. `Replaced=false` never triggers a rollback.
+5. A successful rollback returns the primary error with `RolledBack=true`. A rollback failure returns the `rollback` class, preserving the primary and rollback causes and the recovery paths of target/backup/metadata.
+6. Rotation runs only after a fully successful post-check; the backup of the current transaction is passed as protected. A rotation error returns the `rotation_after_success` class but does not roll back the already successfully written target.
+7. CLI, prompt, diff rendering, dry-run, and manual rollback are wired in `cmd/` and `main.go`; config/logger/i18n are wired into the CLI pipeline: settings are resolved in `PersistentPreRunE`, the log is opened before the mutation and records the outcome of operations with secret redaction. The transaction returns a typed `FailureKind`, which the CLI maps to stable exit codes.
 
-## Резервные копии и ротация
+## Backups and rotation
 
-Реализованные гарантии `internal/backup` (`Create`, `Open`, `List`, `Select`, `Rotate`):
+Implemented guarantees of `internal/backup` (`Create`, `Open`, `List`, `Select`, `Rotate`):
 
-1. Backup ID — ядро имени файла в UTC строго формата `YYYY-MM-DD_HH-MM-SS.nnnnnnnnnZ` (ровно девять цифр nanoseconds и литеральный `Z`); `created_at` в sidecar обязан обозначать то же UTC-время, включая nanoseconds.
-2. Имена файлов: `<prefix>.<backup ID>` для data и `<prefix>.<backup ID>.json` для sidecar. Default prefix — `fstab.bak`; default keep для ротации — **10** newest-копий. Каталог по умолчанию — каталог target.
-3. Collision semantics: если имя занято, `Create` перебирает числовые суффиксы `.1`, `.2`, … (до 1000 попыток); symlink под занятым именем — небезопасная подмена и отклоняется без перехода на суффикс.
-4. Sidecar schema v1 (`schema_version: 1`) — строгий JSON без unknown fields и trailing values: `backup_id`, `created_at`, `source_path` (canonical absolute clean target), `source_sha256`, `backup_sha256` (64 lowercase hex), `uid`, `gid`, `mode` (не выше `07777`), `operation` (whitelist: `before-add`, `before-edit`, `before-delete`, `before-comment`, `before-uncomment`, `before-rollback`, `manual`), `program_version`, `source_verification` (whitelist: `not_checked`, `valid`, `invalid`, `unavailable`).
-5. `Create` никогда не изменяет target и возвращает `Backup` только после записи обоих файлов с mode `0600` через `O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC`, fsync каждого файла, повторного чтения и совпадения SHA-256 data с metadata. Backup гарантирует побайтовое восстановление данных копии, но `source_verification` не заявляет работоспособность повреждённого исходника: `invalid`/`unavailable` фиксируют факт проверки, а не исправляют документ.
-6. `Open`/`List`/`Select` отклоняют symlink-подмену любого уровня, mode отличный от `0600`, corrupt schema, hash mismatch, неверные modes/enums/UTC, чужой `source_path` и чужой prefix. `List` возвращает verified копии текущего target в детерминированном newest-first порядке; `Select` различает not found (`ErrBackupNotFound`) и ambiguous collision ID (`ErrBackupAmbiguous`).
-7. `Rotate` удаляет только собственные verified пары (sidecar, затем data): чужие, повреждённые, symlink и непроверенные записи каталога не входят в candidates и никогда не удаляются; `os.RemoveAll` не вызывается. `keep <= 0` заменяется default 10, protected ID сохраняются даже в зоне удаления, `os.ErrNotExist` при удалении не считается сбоем, а ошибка удаления останавливает ротацию с partial `RotationResult` (`Failed`) и сохранённой первичной ошибкой через `errors.Is`. Ошибки rotation содержат пути, но не данные backup, и не влияют на target.
-8. Automatic rollback transaction использует backup текущей операции напрямую и не переопределяет выбор через повторный `Select`. Manual rollback подключён в `cmd/rollback.go`: выбор копии выполняется до safety backup через positional ID или `--restore` (по умолчанию — newest), подтверждение с diff обязательно (non-TTY требует `--yes`), а `--dry-run` показывает выбранную копию и diff без создания safety copy и без записи target.
+1. A backup ID is the core of the file name in UTC, strictly in the format `YYYY-MM-DD_HH-MM-SS.nnnnnnnnnZ` (exactly nine nanosecond digits and a literal `Z`); `created_at` in the sidecar must denote the same UTC time, including nanoseconds.
+2. File names: `<prefix>.<backup ID>` for data and `<prefix>.<backup ID>.json` for the sidecar. The default prefix is `fstab.bak`; the default rotation keep is **10** newest copies. The default directory is the target's directory.
+3. Collision semantics: if a name is taken, `Create` iterates numeric suffixes `.1`, `.2`, … (up to 1000 attempts); a symlink under a taken name is an unsafe substitution and is rejected without moving to a suffix.
+4. Sidecar schema v1 (`schema_version: 1`) — strict JSON without unknown fields and trailing values: `backup_id`, `created_at`, `source_path` (canonical absolute clean target), `source_sha256`, `backup_sha256` (64 lowercase hex), `uid`, `gid`, `mode` (no higher than `07777`), `operation` (whitelist: `before-add`, `before-edit`, `before-delete`, `before-comment`, `before-uncomment`, `before-rollback`, `manual`), `program_version`, `source_verification` (whitelist: `not_checked`, `valid`, `invalid`, `unavailable`).
+5. `Create` never modifies the target and returns a `Backup` only after writing both files with mode `0600` via `O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC`, fsyncing each file, re-reading, and matching the data SHA-256 with the metadata. A backup guarantees byte-for-byte restoration of the copy's data, but `source_verification` does not claim the damaged source is functional: `invalid`/`unavailable` record the fact of the check, they do not fix the document.
+6. `Open`/`List`/`Select` reject symlink substitution at any level, a mode other than `0600`, corrupt schema, hash mismatch, invalid modes/enums/UTC, a foreign `source_path`, and a foreign prefix. `List` returns verified copies of the current target in deterministic newest-first order; `Select` distinguishes not found (`ErrBackupNotFound`) from an ambiguous collision ID (`ErrBackupAmbiguous`).
+7. `Rotate` deletes only its own verified pairs (sidecar, then data): foreign, corrupted, symlink, and unverified entries of the directory are not candidates and are never deleted; `os.RemoveAll` is never called. `keep <= 0` is replaced by the default 10, protected IDs survive even inside the deletion zone, `os.ErrNotExist` on removal is not a failure, and a removal error stops the rotation with a partial `RotationResult` (`Failed`) and the primary error preserved via `errors.Is`. Rotation errors contain paths but not backup data, and do not affect the target.
+8. The automatic rollback transaction uses the backup of the current operation directly and does not re-select it via `Select`. Manual rollback is wired in `cmd/rollback.go`: copy selection happens before the safety backup via a positional ID or `--restore` (default: newest), confirmation with a diff is mandatory (non-TTY requires `--yes`), and `--dry-run` shows the selected copy and diff without creating a safety copy and without writing the target.
 
-## Документация проекта
+## Project documentation
 
-- [CHANGELOG.md](CHANGELOG.md) — история изменений по релизам.
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — архитектура, сборка, стандарты кода и релизный процесс для разработчиков.
-- [examples/](examples/) — примеры конфигурации (`config-minimal.yaml`, `config-full.yaml`).
-- [docs/man/fstab-edit.1](docs/man/fstab-edit.1) — man-страница (после `make install` — `man fstab-edit`).
+- [CHANGELOG.md](CHANGELOG.md) — changelog by release.
+- [docs/user-guide.en.md](docs/user-guide.en.md) — user guide (English); [docs/user-guide.md](docs/user-guide.md) — Russian original (PDFs of both versions are built by `make pdf`).
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — architecture, build, code standards, and the release process for developers.
+- [examples/](examples/) — configuration examples (`config-minimal.yaml`, `config-full.yaml`).
+- [docs/man/fstab-edit.1](docs/man/fstab-edit.1) — man page in English (primary); [docs/man/fstab-edit.ru.1](docs/man/fstab-edit.ru.1) — Russian translation (after `make install` — `man fstab-edit`; the language is selected by locale).
 
-## Лицензия
+## License
 
 - [MIT License — English](LICENSE.en)
-- [Лицензия MIT — русский перевод](LICENSE.ru)
+- [MIT License — Russian translation](LICENSE.ru)
 
-Русский текст является неофициальным переводом; юридически приоритетной считается английская версия.
+The Russian text is an unofficial translation; the English version takes legal precedence.

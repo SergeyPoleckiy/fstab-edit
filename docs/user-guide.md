@@ -2,6 +2,8 @@
 title: fstab-edit — руководство пользователя
 ---
 
+[English version](user-guide.en.md)
+
 # fstab-edit — руководство пользователя
 
 ## 1. Что такое fstab-edit

@@ -18,5 +18,6 @@ worktrees/
 *.swp
 *.swo
 
-# PDF руководства пользователя — артефакт сборки, собирается целью `make pdf`.
+# PDF руководства пользователя (RU и EN) — артефакты сборки, собираются целью `make pdf`.
 docs/user-guide.pdf
+docs/user-guide.en.pdf

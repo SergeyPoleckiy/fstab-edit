@@ -36,7 +36,7 @@ make            # сборка ./fstab-edit (версия из git describe че
 make test       # go test ./...
 make install    # бинарь + man-страница (gzip) в $(DESTDIR)$(PREFIX), PREFIX=/usr/local
 make uninstall  # обратная операция
-make pdf        # docs/user-guide.md → PDF (pandoc + xelatex, шрифты Free*)
+make pdf        # user-guide RU+EN → PDF (pandoc + xelatex, шрифты Free*)
 go vet ./... && golangci-lint run && gofmt -l .   # обязательные проверки
 ```
 
@@ -81,8 +81,12 @@ pkg/models/     # модель данных (Entry, Node, Diagnostic, Severity)
 
 ## Правила разработки
 
-- **Все комментарии, сообщения тестов и документация — на русском** (man-страница —
-  английский по стандарту man). Код максимально прокомментирован.
+- **Язык документации:** комментарии, сообщения тестов и код — на русском,
+  код максимально прокомментирован. README и руководство пользователя —
+  двуязычные: основной `README.md` — английский, `README.ru.md` — русский;
+  `docs/user-guide.md` (RU) + `docs/user-guide.en.md` (EN). Man-страницы —
+  две: `docs/man/fstab-edit.1` (английская, основная по стандарту man) и
+  `docs/man/fstab-edit.ru.1` (русская). Прочая документация — на русском.
 - Новые строки интерфейса — только через каталоги i18n, ключи парно RU/EN
   (tui-ключи вызывать через Tr/Trf без ручного префикса `tui.`).
 - Тесты: только `t.TempDir()` и fake-seams (`sysutil.CommandRunner`, `tui.Deps`);
@@ -93,13 +97,16 @@ pkg/models/     # модель данных (Entry, Node, Diagnostic, Severity)
   post-merge прогоны → удалить worktree/ветку → `git push origin dev`.
 - Релиз: merge dev → main (предпочтительно ff; при расхождении — с разрешением),
   убрать из main `docs/superpowers/` (только продукт), тег `vX.Y`, `git push origin main`
-  и тег, `make build`, `gh release create` с бинарём и заметками, перенести
-  `[Unreleased]` → `[X.Y]` в CHANGELOG.md. Полный чек-лист — `docs/DEVELOPMENT.md` §4.
+  и тег. Пуш тега `v*` запускает `.github/workflows/release.yml`: GitHub Actions
+  автоматически собирают статический бинарь, формируют `SHA256SUMS` и публикуют
+  GitHub Release (бинарь + контрольные суммы + заметки); ручной `gh release create`
+  не нужен — только запасной вариант. Перенести `[Unreleased]` → `[X.Y]` в
+  CHANGELOG.md. Полный чек-лист — `docs/DEVELOPMENT.md` §4.
 
 ## Отложено (defer, не блокирует релизы)
 
 Кастомные палитры цветов через YAML — реализовано (`tui.colors`, этап 5);
-английская версия руководства (user-guide.en.md);
+двуязычная документация (README и user-guide RU/EN, русская man) — реализовано (этап 5);
 описания назначения опций в подсказках формы; пакеты .deb/.rpm/.pkg.tar.zst;
 перфоманс (кэш рендера таблицы, updateScrollable O(n), loadLog целиком,
 синхронные lsblk/restore без таймаута).
