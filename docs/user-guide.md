@@ -54,8 +54,17 @@ title: fstab-edit — руководство пользователя
 git clone https://github.com/SergeyPoleckiy/fstab-edit.git
 cd fstab-edit
 make            # собирает ./fstab-edit
-make install    # сборка + установка в /usr/local/bin
+sudo make install    # сборка + установка бинаря и man-страницы
 ```
+
+`make install` копирует статический бинарь в `$(PREFIX)/bin`
+(`PREFIX` по умолчанию `/usr/local`, для другого пути —
+`sudo make install PREFIX=/usr`) и man-страницу `fstab-edit(1)` (с gzip,
+как принято в дистрибутивах) в `$(PREFIX)/share/man/man1`. После установки
+полная справка по командам и кодам выхода доступна через `man fstab-edit`.
+Для построения пакета или инспекции устанавливаемых файлов поддерживается
+`DESTDIR` (например, `make install DESTDIR=/tmp/stage`); удаление —
+`sudo make uninstall` (с теми же `PREFIX`/`DESTDIR`).
 
 Версия подставляется автоматически из git (`git describe --tags`): сборка из
 тега `v1.0` даёт версию `v1.0`, из коммитов после тега — `v1.0-N-g<хеш>`,
@@ -72,6 +81,11 @@ sudo cp fstab-edit /usr/local/bin/
 sudo chmod 755 /usr/local/bin/fstab-edit
 fstab-edit --version
 ```
+
+Релизный архив содержит только бинарник; man-страница при такой установке
+не ставится — полная справка по командам доступна в `docs/man/fstab-edit.1`
+исходников (установка — `sudo make install`, см. §2.2) и на странице
+релиза в репозитории проекта.
 
 Удаление — просто удаление бинарника: программа не устанавливает
 service-файлов и не меняет систему:
