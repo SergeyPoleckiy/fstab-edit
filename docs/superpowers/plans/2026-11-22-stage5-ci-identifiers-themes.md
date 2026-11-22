@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Три оставшихся направления по ТЗ v2 без VM-инфраструктуры: (1) CI на GitHub Actions (lint → тесты с race → порог покрытия 80% → статическая сборка; релизный workflow по тегу с бинарём и SHA-256 — критерии приёмки v2 №11/13), (2) автоподстановка PARTUUID/PARTLABEL и обработка повторяющихся идентификаторов (ТЗ v2 этап 3), (3) пользовательские темы — переопределение цветов встроенной палитры через YAML (ТЗ v2 этап 4, «пользовательские темы»).
+**Goal:** Четыре направления: (1) CI на GitHub Actions (lint → тесты с race → порог покрытия 80% → статическая сборка; релизный workflow по тегу с бинарём и SHA-256 — критерии приёмки v2 №11/13), (2) автоподстановка PARTUUID/PARTLABEL и обработка повторяющихся идентификаторов (ТЗ v2 этап 3), (3) пользовательские темы — переопределение цветов встроенной палитры через YAML (ТЗ v2 этап 4), (4) английская документация: основной README на английском с оглавлением, README.ru.md, user-guide.en.md (PDF обеих версий).
 
 **Проверка ранее предложенных пунктов (уже реализовано, в этап 5 НЕ входит):**
 - SELinux/xattrs: `internal/writer` переносит все xattrs (flistxattr/fgetxattr/fsetxattr) через `copyMetadata` (metadata.go) при atomic replace — ТЗ v2 §6.5 покрыто на уровне кода; enforcing-тесты — в VM-этапе.
@@ -32,6 +32,7 @@
 - Modify: `tui/complete.go` — `deviceHints`: приоритет UUID → PARTUUID → LABEL → PARTLABEL → Path; пометка дубликатов в Info.
 - Modify: `internal/config/config.go` — `tui.colors` (map роль→цвет) + валидация ролей/формата цветов.
 - Modify: `tui/theme.go` — переопределения палитры поверх встроенной темы; `tui/app.go`/`cmd/tui.go` — проброс в Options.
+- Modify: `README.md` — становится английским с оглавлением; Create: `README.ru.md` — русская версия с оглавлением; Create: `docs/user-guide.en.md` — английское руководство.
 - Modify: `README.md`, `docs/user-guide.md`, `docs/DEVELOPMENT.md` — CI-бейдж, релизный процесс (автоматический), автоподстановка, `tui.colors`.
 - Modify: `internal/i18n/catalog_ru.go`, `catalog_en.go` — новые ключи парно (пометка дубликата).
 
@@ -93,9 +94,21 @@ tui:
 - [ ] user-guide/README: раздел тем — пользовательские переопределения с примером; examples/config-full.yaml — закомментированный блок colors с примером.
 - Коммит: `feat: support custom palette overrides via tui.colors`
 
-## Task 4: финальный whole-branch review и merge
+## Task 4: английская документация и оглавление README
 
-- [ ] Финальный review: CI-файлы валидны (actionlint или ручная проверка YAML), критерии ТЗ v2 №11/13 закрыты, i18n парность, тесты, vet/lint/gofmt, сборка.
+Решение владельца: основной README — английский; русская версия — отдельным файлом. Man-страница уже английская (стандарт man) — без изменений, только сверка актуальности.
+
+- [ ] `README.md` → **английский** (полный перевод текущего содержимого: статус этапов, установка, CLI-таблица, TUI, конфигурация, журнал, backup/rollback, примеры, структура проекта, ссылки, лицензия); **оглавление** (Table of Contents) со ссылками на все разделы H2; ссылка-переключатель на русскую версию в начале.
+- [ ] `README.ru.md` — русская версия (текущее содержимое + те же обновления статуса этапа 5), тоже с оглавлением; ссылка-переключатель на английскую. Оба README синхронизированы по содержимому (проверка разделов паритетом).
+- [ ] `docs/user-guide.en.md` — полный английский перевод руководства пользователя (все разделы §1–§10; терминология консистентна с man). Русский user-guide.md остаётся; ссылки-переключатели в начале обоих.
+- [ ] `Makefile`: `pdf` собирает оба PDF — `docs/user-guide.pdf` (RU) и `docs/user-guide.en.pdf` (EN); `.gitignore` покрывает оба.
+- [ ] `README` ссылки: user-guide RU/EN, man, spec v1/v2 — проверить валидность всех.
+- [ ] AGENTS.md и DEVELOPMENT.md: правило «документация RU» уточнить — README и user-guide двуязычные (EN основной README), остальная документация RU.
+- Коммит: `docs: english readme and user guide with toc`
+
+## Task 5: финальный whole-branch review и merge
+
+- [ ] Финальный review: CI-файлы валидны (actionlint или ручная проверка YAML), критерии ТЗ v2 №11/13 закрыты, i18n парность, тесты, vet/lint/gofmt, сборка; паритет README/README.ru.md и user-guide RU/EN (разделы соответствуют), оглавление работает (якоря GitHub).
 - [ ] Фиксы → re-review → merge fast-forward в dev → post-merge проверки → удалить worktree/branch → push origin dev. Первый прогон CI на GitHub — проверить фактический статус workflow после push (gh run list / gh run watch).
 
 ## Deferred (в merge не блокирует)
@@ -103,4 +116,4 @@ tui:
 - `apply-mounts` (ТЗ v2 этап 4): явная команда монтирования с таймаутом и отчётом — отдельный этап 6.
 - QEMU/VM-матрица и SELinux enforcing-тесты (критерии №14/15) — инфраструктурный этап.
 - Автоматическое извлечение заметок релиза из CHANGELOG (release.yml использует generate-notes).
-- Описания опций в подсказках; user-guide.en.md; пакеты .deb/.rpm.
+- Описания опций в подсказках; пакеты .deb/.rpm.
