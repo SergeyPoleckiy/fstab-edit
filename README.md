@@ -1,5 +1,7 @@
 # fstab-edit
 
+[![CI](https://github.com/SergeyPoleckiy/fstab-edit/actions/workflows/ci.yml/badge.svg)](https://github.com/SergeyPoleckiy/fstab-edit/actions/workflows/ci.yml)
+
 Утилита для безопасного редактирования `/etc/fstab` в Linux: CLI для автоматизации и TUI для интерактивной работы — оба интерфейса реализованы. Основные свойства: транзакционная запись, статическая проверка файла-кандидата, резервные копии, rollback и побайтовое сохранение неизменённого содержимого.
 
 ## Разработка с использованием ИИ
