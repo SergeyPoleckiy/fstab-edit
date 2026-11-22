@@ -497,11 +497,18 @@ func (a *App) resolveSettings(cmd *cobra.Command) *cliapp.ExitError {
 		// fallback Message после локализованного текста.
 		var colorErr *config.TUIColorError
 		if errors.As(err, &colorErr) {
+			// Путь файла-источника из Load (при автозагрузке --config пуст,
+			// а реальный путь знает только config.Load); флаг — запасной
+			// вариант для гипотетических прямых вызовов валидации.
+			path := colorErr.Path
+			if path == "" {
+				path = a.flags.config
+			}
 			key := "config.bad_tui_color_role"
-			args := []any{colorErr.Role, a.flags.config, config.TUIColorRoleList()}
+			args := []any{colorErr.Role, path, config.TUIColorRoleList()}
 			if colorErr.Reason == config.TUIColorInvalidColor {
 				key = "config.bad_tui_color_value"
-				args = []any{colorErr.Value, colorErr.Role, a.flags.config}
+				args = []any{colorErr.Value, colorErr.Role, path}
 			}
 			return &cliapp.ExitError{
 				Code:        cliapp.ExitUsage,

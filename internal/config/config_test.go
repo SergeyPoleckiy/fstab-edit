@@ -533,8 +533,9 @@ func TestLoadTUIColorsInvalid(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stubSystemConfig(t)
+			explicitPath := writeConfig(t, t.TempDir(), "explicit.yaml", tc.yaml)
 			_, _, err := Load(LoadOptions{
-				ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", tc.yaml),
+				ExplicitPath: explicitPath,
 				Environ:      nil,
 				EUID:         1000,
 				LookupUser:   testLookupUser(t.TempDir()),
@@ -553,7 +554,39 @@ func TestLoadTUIColorsInvalid(t *testing.T) {
 				t.Fatalf("отклонённая пара = (%q, %q), want (%q, %q)",
 					colorErr.Role, colorErr.Value, tc.role, tc.value)
 			}
+			// Load обязан сообщить путь файла-источника: сообщение об ошибке
+			// называет файл, без него пользователь автозагрузки не поймёт,
+			// какая из конфигураций отклонена.
+			if colorErr.Path != explicitPath {
+				t.Fatalf("Path = %q, want %q (путь explicit-конфига)", colorErr.Path, explicitPath)
+			}
 		})
+	}
+}
+
+// TestLoadTUIColorsLeadingZeros фиксирует границу «номер ANSI с ведущими
+// нулями»: "00" и "007" — валидные номера (strconv.Atoi даёт 0 и 7 в
+// диапазоне 0–255). Регрессия здесь дешевле дисциплины: явный кейс
+// запрещает будущему рефактору валидации случайно отклонить ведущие нули.
+func TestLoadTUIColorsLeadingZeros(t *testing.T) {
+	stubSystemConfig(t)
+	yaml := `
+tui:
+  colors:
+    info: "00"
+    warning: "007"
+`
+	s, _, err := Load(LoadOptions{
+		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", yaml),
+		Environ:      nil,
+		EUID:         1000,
+		LookupUser:   testLookupUser(t.TempDir()),
+	})
+	if err != nil {
+		t.Fatalf("номера с ведущими нулями должны приниматься: %v", err)
+	}
+	if s.TUIColors["info"] != "00" || s.TUIColors["warning"] != "007" {
+		t.Fatalf("TUIColors = %+v, want info=00 warning=007", s.TUIColors)
 	}
 }
 

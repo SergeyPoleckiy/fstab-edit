@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 // knownTUIColorRoles — множество семантических ролей палитры TUI,
@@ -76,26 +77,33 @@ const (
 // TUIColorError — отказ валидации пары роль→цвет из tui.colors. Отдельный
 // тип позволяет cmd-слою отличить этот отказ от прочих сбоев конфигурации
 // и выбрать локализованное сообщение по Reason; Error() держит русский
-// текст как fallback для логов и для ExitError.Message без ключа.
+// текст как fallback для логов и для ExitError.Message без ключа. Path —
+// путь файла конфигурации, давшего отказ (заполняется в Load; при прямом
+// вызове валидации остаётся пустым).
 type TUIColorError struct {
 	Role   string         // отклонённая роль
 	Value  string         // отклонённое значение цвета
 	Reason TUIColorReason // unknown_role | invalid_color
+	Path   string         // файл конфигурации-источник (может быть пустым)
 }
 
 // Error возвращает русское диагностическое сообщение (fallback; точка
 // печати cmd переводит его ключами по Reason).
 func (e *TUIColorError) Error() string {
+	path := e.Path
+	if path == "" {
+		path = "<unknown>"
+	}
 	switch e.Reason {
 	case TUIColorUnknownRole:
-		return fmt.Sprintf("неизвестная роль цвета tui.colors %q: допустимые роли: %s",
-			e.Role, TUIColorRoleList())
+		return fmt.Sprintf("неизвестная роль цвета tui.colors %q в конфигурации %s: допустимые роли: %s",
+			e.Role, path, TUIColorRoleList())
 	case TUIColorInvalidColor:
 		return fmt.Sprintf(
-			"некорректный цвет tui.colors %q для роли %q: допустимы hex #rrggbb, номер ANSI 0–255 или имя ANSI-цвета",
-			e.Value, e.Role)
+			"некорректный цвет tui.colors %q для роли %q в конфигурации %s: допустимы hex #rrggbb, номер ANSI 0–255 или имя ANSI-цвета",
+			e.Value, e.Role, path)
 	default:
-		return fmt.Sprintf("некорректный tui.colors: роль %q, значение %q", e.Role, e.Value)
+		return fmt.Sprintf("некорректная пара tui.colors %q=%q", e.Role, e.Value)
 	}
 }
 
@@ -107,21 +115,7 @@ func TUIColorRoleList() string {
 		roles = append(roles, role)
 	}
 	slices.Sort(roles)
-	return joinComma(roles)
-}
-
-// joinComma склеивает строки через запятую с пробелом (strings.Join
-// вынесен сюда, чтобы сообщение об ошибке и его EN-перевод в i18n собирали
-// список одинаково).
-func joinComma(items []string) string {
-	out := ""
-	for i, item := range items {
-		if i > 0 {
-			out += ", "
-		}
-		out += item
-	}
-	return out
+	return strings.Join(roles, ", ")
 }
 
 // validateTUIColors отклоняет неизвестные роли и цвета невалидного формата

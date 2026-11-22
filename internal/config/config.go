@@ -117,16 +117,24 @@ func Load(opts LoadOptions) (Settings, []string, error) {
 	s := Default()
 	warnings := make([]string, 0)
 
+	// loadedPath — путь последнего успешно прочитанного файла конфигурации.
+	// Используется только для диагностики: при отказе валидации tui.colors
+	// ошибка TUIColorError получает этот путь, чтобы сообщение называло
+	// файл-источник, а не пустую строку (автозагрузка идёт без --config).
+	loadedPath := ""
+
 	explicit := opts.ExplicitPath != ""
 	if explicit {
 		if err := loadFileInto(&s, opts.ExplicitPath, opts.EUID, false); err != nil {
 			return s, warnings, err
 		}
+		loadedPath = opts.ExplicitPath
 	} else if opts.EUID != 0 {
 		// Root-процесс не загружает user config автоматически (ТЗ §13.2).
 		if err := loadFileInto(&s, systemConfigPath, opts.EUID, true); err != nil {
 			return s, warnings, err
 		}
+		loadedPath = systemConfigPath
 		home := ""
 		if opts.LookupUser != nil {
 			_, h, err := opts.LookupUser(opts.EUID)
@@ -137,9 +145,11 @@ func Load(opts LoadOptions) (Settings, []string, error) {
 			home = h
 		}
 		if home != "" {
-			if err := loadFileInto(&s, filepath.Join(home, userConfigRelPath), opts.EUID, false); err != nil {
+			userPath := filepath.Join(home, userConfigRelPath)
+			if err := loadFileInto(&s, userPath, opts.EUID, false); err != nil {
 				return s, warnings, err
 			}
+			loadedPath = userPath
 		}
 	}
 
@@ -147,6 +157,14 @@ func Load(opts LoadOptions) (Settings, []string, error) {
 		return s, warnings, err
 	}
 	if err := validateValues(&s); err != nil {
+		// Отказ валидации tui.colors получает путь файла-источника: валидация
+		// идёт по резолвленной палитре, но диагностика должна называть файл,
+		// а cmd-слой при пустом Path в падении на --config (пустой при
+		// автозагрузке) выводил бы «в конфигурации : …».
+		var colorErr *TUIColorError
+		if errors.As(err, &colorErr) && colorErr.Path == "" {
+			colorErr.Path = loadedPath
+		}
 		return s, warnings, err
 	}
 	return s, warnings, nil

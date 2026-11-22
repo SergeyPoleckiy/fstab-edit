@@ -484,15 +484,20 @@ func TestMutationDurationMeasured(t *testing.T) {
 
 // TestInvalidTUIColorPaletteRejected проверяет, что неизвестная роль или
 // невалидный формат цвета в tui.colors отклоняются кодом 2 с локализованным
-// сообщением, называющим отклонённую пару, и target остаётся неизменным.
+// сообщением, называющим отклонённую пару и файл-источник, и target остаётся
+// неизменным. Отдельным кейсом фиксируется английский текст при --lang=en:
+// EN-ветка детальных ключей защищена не только парностью TestCatalogParity,
+// но и сквозным выводом.
 func TestInvalidTUIColorPaletteRejected(t *testing.T) {
 	cases := []struct {
 		name   string
 		yaml   string
 		detail string
+		lang   string
 	}{
-		{"неизвестная роль", "tui:\n  colors:\n    nonsense: red\n", "неизвестная роль цвета tui.colors \"nonsense\""},
-		{"невалидный цвет", "tui:\n  colors:\n    title: \"#0f0\"\n", "некорректный цвет \"#0f0\" для роли tui.colors \"title\""},
+		{"неизвестная роль", "tui:\n  colors:\n    nonsense: red\n", "неизвестная роль цвета tui.colors \"nonsense\"", ""},
+		{"невалидный цвет", "tui:\n  colors:\n    title: \"#0f0\"\n", "некорректный цвет \"#0f0\" для роли tui.colors \"title\"", ""},
+		{"неизвестная роль, английский", "tui:\n  colors:\n    nonsense: red\n", "unknown tui.colors role \"nonsense\"", "en"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -501,11 +506,21 @@ func TestInvalidTUIColorPaletteRejected(t *testing.T) {
 
 			buffers := &appBuffers{}
 			app := newConfigApp(buffers, configPath, nil, strings.NewReader(""), false)
-			if code := app.Execute(addArgs(target, "--yes")); code != 2 {
+			args := addArgs(target, "--yes")
+			if tc.lang != "" {
+				args = append(args, "--lang", tc.lang)
+			}
+			if code := app.Execute(args); code != 2 {
 				t.Fatalf("code = %d, want 2; stderr: %s", code, buffers.stderr.String())
 			}
 			if !strings.Contains(buffers.stderr.String(), tc.detail) {
 				t.Fatalf("stderr должен содержать %q: %q", tc.detail, buffers.stderr.String())
+			}
+			// Сообщение обязано называть файл-источник отказа: путь явного
+			// --config проброшен Load в TUIColorError.Path, пустое место
+			// означало бы регрессию «в конфигурации : …».
+			if !strings.Contains(buffers.stderr.String(), configPath) {
+				t.Fatalf("stderr должен называть конфигурацию %q: %q", configPath, buffers.stderr.String())
 			}
 			if !bytes.Equal(readTargetBytes(t, target), []byte(e2eFixture)) {
 				t.Fatal("invalid palette changed target")
