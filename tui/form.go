@@ -553,7 +553,9 @@ func (m model) formHintsView() string {
 	for i := start; i < min(len(m.form.hints), start+maxFormHints); i++ {
 		hint := m.form.hints[i]
 		// Значение усечено до 32 символов, чтобы правая колонка Info не уплывала
-		// на узких терминалах; Info уже ограничена maxDeviceHintInfoLen.
+		// на узких терминалах. Info ограничена maxDeviceHintInfoLen на этапе
+		// сборки, но маркер неуникального идентификатора намеренно дописывается
+		// поверх этого лимита, поэтому здесь Info печатается без дополнительной обрезки.
 		line := fmt.Sprintf("%-32.32s %s", hint.Value, hint.Info)
 		if i == m.form.hintIdx {
 			line = m.theme.Selected.Render(line)

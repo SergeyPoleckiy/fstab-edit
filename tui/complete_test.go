@@ -255,6 +255,27 @@ func TestDeviceHintsDuplicateMarker(t *testing.T) {
 			}
 		}
 	})
+
+	// Пустая правая колонка: у устройств нет ни TYPE, ни FSType, ни Size, ни
+	// точки монтирования, ни метки — Info собирается в пустую строку. Маркер
+	// обязан дописаться без ведущего пробела, чтобы подсказка не начиналась
+	// с разделителя. Этим закрывается ветка «пустой Info» логики дубликатов.
+	t.Run("пустой Info — маркер без ведущего пробела", func(t *testing.T) {
+		bare := []sysutil.BlockDevice{
+			{Path: "/dev/sdg1", UUID: "DUP-BARE"},
+			{Path: "/dev/sdh1", UUID: "DUP-BARE"},
+		}
+		hints := deviceHints("ru", bare)
+		if len(hints) != len(bare) {
+			t.Fatalf("подсказок: %d, ожидалось %d", len(hints), len(bare))
+		}
+		marker := "(не уникальный идентификатор)"
+		for i, hint := range hints {
+			if hint.Info != marker {
+				t.Fatalf("Info[%d] %q должна состоять ровно из маркера %q без ведущего пробела", i, hint.Info, marker)
+			}
+		}
+	})
 }
 
 // TestOptionHintsEdgeTokens проверяет граничные токены: trailing comma
