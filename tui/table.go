@@ -220,9 +220,14 @@ func fitCell(value string, width int) string {
 // source — cyan, mount — зелёный, fs type — оранжевый, options — серый.
 // Колонка активности показывает текстовый маркер: "!" красным для строки с
 // ошибкой валидатора, "?" жёлтым для предупреждения, иначе "+" (активная)
-// или "-" (закомментированная) как раньше. Курсорная строка целиком
-// оборачивается theme.Selected поверх уже стилизованных ячеек — lipgloss
-// корректно обрабатывает вложенность ANSI-последовательностей.
+// или "-" (закомментированная) как раньше.
+// Курсорная строка — особый случай: она рендерится БЕЗ внутренних стилей
+// (plain-ячейки, маркер-символ без цвета) и целиком оборачивается
+// theme.Selected. Причина: lipgloss НЕ умеет вложенность — каждый
+// Style.Render заканчивается сбросом \x1b[0m, который гасит SGR внешнего
+// Selected, и выделение получалось прерывистым (регрессия против старого
+// plain-рендера). Проблемность записи под курсором читается маркером-символом
+// ("!"/"?") без цвета — текстовые маркеры обязательны во всех темах (ТЗ §9.4).
 func (m model) viewTable() string {
 	var b strings.Builder
 	title := m.theme.Title.Render(Tr(m.opts.Lang, "app_title"))
@@ -244,17 +249,19 @@ func (m model) viewTable() string {
 		line := nodePositionLine(m.document, idx)
 		// Маркер активности: текстовый, читается без цвета (ТЗ §9.4/§9.6).
 		// Диагностика валидатора сильнее признака активности: проблемная
-		// строка помечается "!" или "?" даже если запись активна.
-		state := "+"
+		// строка помечается "!" или "?" даже если запись активна. stateMarker —
+		// plain-символ (для курсорной строки), stateCell — цветной маркер
+		// (для остальных строк).
+		stateMarker := "+"
 		if node.Kind == models.NodeCommentedEntry {
-			state = "-"
+			stateMarker = "-"
 		}
-		stateCell := state
+		stateCell := stateMarker
 		switch m.severityByLine[line] {
 		case models.SeverityError:
-			stateCell = m.theme.SevError.Render("!")
+			stateMarker, stateCell = "!", m.theme.SevError.Render("!")
 		case models.SeverityWarning:
-			stateCell = m.theme.SevWarning.Render("?")
+			stateMarker, stateCell = "?", m.theme.SevWarning.Render("?")
 		}
 		entry := node.Entry
 		var device, mount, fsType, options, dump, pass string
@@ -270,18 +277,30 @@ func (m model) viewTable() string {
 				pass = entry.Pass.Value
 			}
 		}
-		// Строка собирается из ячеек: значение подогнано под ширину колонки
-		// и стилизовано своим Field-стилем, разделители — одиночные пробелы
-		// (как в формате заголовка). Dump/pass как раньше без подсветки.
-		rowText := fmt.Sprintf("%-*d %s %s %s %s %s %s %s",
+		// Строка собирается в двух вариантах из одних значений. Подсвеченный:
+		// каждая ячейка подогнана под ширину колонки и стилизована своим
+		// Field-стилем, маркер — цветной, разделители — одиночные пробелы
+		// (как в формате заголовка). Plain: те же ячейки без стилей и
+		// маркер-символ — им рендерится курсорная строка перед Selected,
+		// чтобы вложенные сбросы SGR не гасили выделение. Dump/pass как раньше
+		// без подсветки в обоих вариантах.
+		plainRow := fmt.Sprintf("%-*d %s %s %s %s %s %s %s",
+			widthColNum, line,
+			fitCell(device, widthColDevice),
+			fitCell(mount, widthColMount),
+			fitCell(fsType, widthColFSType),
+			fitCell(options, widthColOptions),
+			dump, pass, stateMarker)
+		styledRow := fmt.Sprintf("%-*d %s %s %s %s %s %s %s",
 			widthColNum, line,
 			m.theme.FieldSource.Render(fitCell(device, widthColDevice)),
 			m.theme.FieldMount.Render(fitCell(mount, widthColMount)),
 			m.theme.FieldFSType.Render(fitCell(fsType, widthColFSType)),
 			m.theme.FieldOptions.Render(fitCell(options, widthColOptions)),
 			dump, pass, stateCell)
+		rowText := styledRow
 		if row == m.cursor {
-			rowText = m.theme.Selected.Render(rowText)
+			rowText = m.theme.Selected.Render(plainRow)
 		}
 		b.WriteString(rowText + "\n")
 	}

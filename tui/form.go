@@ -496,18 +496,20 @@ func (m model) viewForm() string {
 }
 
 // highlightPreview подсвечивает raw-строку предпросмотра формы Field-стилями
-// темы (ТЗ §5.3): raw-строка fstab состоит ровно из 6 полей через пробел
-// (source, mount_point, fs_type, options, dump, pass; options не содержит
-// пробелов — значения с пробелами кодируются escape-последовательностями),
-// поэтому SplitN на 6 частей безопасен. Первые четыре поля стилизуются теми
-// же Field-стилями, что и колонки таблицы; dump/pass остаются без подсветки
-// (в таблице они тоже без Field-стиля). Неполная строка (форма ещё пустая или
-// запись не сериализуется) показывается приглушённой, как раньше.
+// темы (ТЗ §5.3). Raw-строка fstab таб-разделена: ровно 6 полей через "\t"
+// (source, mount_point, fs_type, options, dump, pass); значения с пробелами
+// кодируются escape-последовательностями (\040), поэтому сплит по табу
+// корректен. refreshPreview берёт строку из node.Raw сериализации editor.Add —
+// она всегда таб-разделена, сплит по пробелу был бы мёртвым кодом. Первые
+// четыре поля стилизуются теми же Field-стилями, что и колонки таблицы;
+// dump/pass остаются без подсветки (в таблице они тоже без Field-стиля).
+// Строка без 6 таб-полей (форма ещё пустая или запись не сериализуется)
+// показывается приглушённой, как раньше.
 func (m model) highlightPreview(preview string) string {
 	if preview == "" {
 		return m.theme.Muted.Render(preview)
 	}
-	fields := strings.SplitN(preview, " ", 6)
+	fields := strings.SplitN(preview, "\t", 6)
 	if len(fields) < 6 {
 		return m.theme.Muted.Render(preview)
 	}
@@ -517,7 +519,7 @@ func (m model) highlightPreview(preview string) string {
 		m.theme.FieldFSType.Render(fields[2]),
 		m.theme.FieldOptions.Render(fields[3]),
 		fields[4], fields[5], // dump/pass — без подсветки, как в таблице
-	}, " ")
+	}, "\t")
 	return styled
 }
 

@@ -6,9 +6,23 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+
 	"fstab-edit/internal/editor"
 	"fstab-edit/pkg/models"
 )
+
+// forceColor включает 256-цветный профиль lipgloss на время теста: в тестовом
+// окружении нет TTY, lipgloss отключает цвета и ANSI-проверки (количество
+// последовательностей, наличие Field-стилей) оказывались бы мёртвыми. Профиль
+// восстанавливается в конце теста, чтобы не влиять на остальные.
+func forceColor(t *testing.T) {
+	t.Helper()
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+}
 
 // ansiPattern выделяет ANSI SGS-последовательности: lipgloss оборачивает
 // стилизованные ячейки кодами вида "\x1b[38;5;81m...\x1b[0m", значение внутри
@@ -207,6 +221,44 @@ func TestViewTableColumnAlignment(t *testing.T) {
 	}
 }
 
+// ansiCount считает ANSI-последовательности в строке.
+func ansiCount(s string) int { return strings.Count(s, "\x1b[") }
+
+// TestSelectedRowPlainCells: курсорная строка рендерится без внутренних
+// стилей — Selected оборачивает plain-строку (≤2 ANSI-последовательности:
+// открывающий SGR и сброс), иначе вложенные \x1b[0m ячеек гасили бы выделение
+// (Important-регрессия ревью). Некурсорная строка содержит Field-стили
+// ячеек и цветной маркер (ANSI присутствуют). Проблемность записи под
+// курсором читается plain-маркером-символом.
+func TestSelectedRowPlainCells(t *testing.T) {
+	forceColor(t)
+	m := testModel(t, testOptions(t, writeTestFstab(t, problemFstab)))
+	m.cursor = 0 // курсор на первой строке (error): маркер "!" plain
+	var cursorLine, otherLine string
+	for _, line := range strings.Split(m.viewTable(), "\n") {
+		if strings.Contains(stripANSI(line), "UUID=aaa") {
+			cursorLine = line
+		}
+		if strings.Contains(stripANSI(line), "//srv/share") {
+			otherLine = line
+		}
+	}
+	if cursorLine == "" || otherLine == "" {
+		t.Fatal("строки таблицы не найдены в выводе viewTable")
+	}
+	if n := ansiCount(cursorLine); n > 2 {
+		t.Fatalf("курсорная строка должна иметь ≤2 ANSI-последовательностей (только Selected), получено %d: %q",
+			n, cursorLine)
+	}
+	if n := ansiCount(otherLine); n < 2 {
+		t.Fatalf("некурсорная строка должна содержать ANSI Field-стилей: %q", otherLine)
+	}
+	// Маркер проблемной записи под курсором читается plain-символом.
+	if !strings.Contains(stripANSI(cursorLine), " 0 1 !") {
+		t.Fatalf("курсорная error-строка должна показывать plain \"!\":\n%s", stripANSI(cursorLine))
+	}
+}
+
 // TestFitCell проверяет подгонку ячеек: дополнение пробелами, усечение по
 // рунам (в т.ч. многобайтовые символы — регрессия byte-wise усечения fmt).
 func TestFitCell(t *testing.T) {
@@ -226,23 +278,42 @@ func TestFitCell(t *testing.T) {
 	}
 }
 
-// TestHighlightPreview: полная raw-строка предпросмотра разбирается на 6
-// полей и стилизуется Field-стилями (значения остаются читаемыми), неполная
-// строка показывается как есть.
+// TestHighlightPreview собирает предпросмотр реальным путём (newAddForm →
+// заполнение полей → refreshPreview): raw-строка от editor.Add таб-разделена,
+// подсветка обязана разобрать её на поля и стилизовать — мёртвый сплит по
+// пробелу вернул бы приглушённую строку без ANSI (Important-регрессия ревью).
 func TestHighlightPreview(t *testing.T) {
+	forceColor(t)
 	m := testModel(t, testOptions(t, writeTestFstab(t, problemFstab)))
-	preview := "UUID=aaa / ext4 defaults 0 1"
-	out := m.highlightPreview(preview)
+	f := newAddForm()
+	f.inputs[0].SetValue("UUID=aaa")
+	f.inputs[1].SetValue("/")
+	f.inputs[2].SetValue("ext4")
+	f.inputs[3].SetValue("defaults")
+	f.inputs[4].SetValue("0")
+	f.inputs[5].SetValue("1")
+	f.refreshPreview()
+	if f.preview == "" {
+		t.Fatal("refreshPreview должен дать непустую raw-строку")
+	}
+	if !strings.Contains(f.preview, "\t") {
+		t.Fatalf("raw-строка предпросмотра должна быть таб-разделена: %q", f.preview)
+	}
+	out := m.highlightPreview(f.preview)
 	for _, value := range []string{"UUID=aaa", "/", "ext4", "defaults", "0", "1"} {
 		if !strings.Contains(out, value) {
 			t.Fatalf("подсвеченный preview должен содержать %q: %q", value, out)
 		}
 	}
-	// Пустой и неполный preview не паникуют и не теряют текст.
+	// Подсветка реально применена: Field-стили добавили ANSI-коды.
+	if !strings.Contains(out, "\x1b[") {
+		t.Fatalf("preview без ANSI: подсветка не применилась: %q", out)
+	}
+	// Пустой и не-таб preview не паникуют и возвращаются как есть (muted).
 	if got := m.highlightPreview(""); stripANSI(got) != "" {
 		t.Fatalf("пустой preview: %q", got)
 	}
 	if got := stripANSI(m.highlightPreview("UUID=aaa /")); got != "UUID=aaa /" {
-		t.Fatalf("неполный preview должен вернуться как есть: %q", got)
+		t.Fatalf("не-таб preview должен вернуться как есть: %q", got)
 	}
 }

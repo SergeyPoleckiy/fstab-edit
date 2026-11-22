@@ -80,6 +80,9 @@ func severityRank(s models.Severity) int {
 // через reloadFromDisk). Document nil (loadErr-экран) даёт пустую map, а не
 // nil: рендер таблицы читает кэш без nil-проверок. Info-диагностики не
 // кэшируются — подсветка цветом только для error/warning.
+// Примечание: валидатор проверяет только активные записи, поэтому
+// закомментированная запись маркеров "!"/"?" не получает — это осознанная
+// семантика (отключённая запись конфигурацию не ломает), а не баг.
 func (m *model) rebuildDiagnostics() {
 	m.severityByLine = make(map[int]models.Severity)
 	if m.document == nil {
