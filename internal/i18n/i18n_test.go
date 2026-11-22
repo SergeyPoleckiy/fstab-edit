@@ -78,3 +78,22 @@ func TestAcceptYes(t *testing.T) {
 		}
 	}
 }
+
+// TestCatalogParity фиксирует симметричность каталогов: множества ключей ru и
+// en обязаны совпадать, иначе один из языков молча деградирует до fallback на
+// другой или до самого ключа. Проверяет также, что каталоги непусты.
+func TestCatalogParity(t *testing.T) {
+	if len(catalogRU) == 0 || len(catalogEN) == 0 {
+		t.Fatalf("пустой каталог: ru=%d en=%d", len(catalogRU), len(catalogEN))
+	}
+	for key := range catalogRU {
+		if _, ok := catalogEN[key]; !ok {
+			t.Fatalf("ключа %q нет в en-каталоге", key)
+		}
+	}
+	for key := range catalogEN {
+		if _, ok := catalogRU[key]; !ok {
+			t.Fatalf("ключа %q нет в ru-каталоге", key)
+		}
+	}
+}

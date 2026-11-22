@@ -1,0 +1,85 @@
+{
+   "blockdevices": [
+      {
+         "name": "sda",
+         "path": "/dev/sda",
+         "type": "disk",
+         "fstype": null,
+         "size": "931.5G",
+         "mountpoint": null,
+         "label": null,
+         "uuid": null,
+         "model": "Samsung_SSD_870_EVO",
+         "children": [
+            {
+               "name": "sda1",
+               "path": "/dev/sda1",
+               "type": "part",
+               "fstype": "vfat",
+               "size": "512M",
+               "mountpoint": "/boot/efi",
+               "label": "EFI",
+               "uuid": "AAAA-1111",
+               "model": null
+            },
+            {
+               "name": "sda2",
+               "path": "/dev/sda2",
+               "type": "part",
+               "fstype": "LVM2_member",
+               "size": "931G",
+               "mountpoint": null,
+               "label": null,
+               "uuid": "lvm-pv-uuid-0000",
+               "model": null,
+               "children": [
+                  {
+                     "name": "cachyos-root",
+                     "path": "/dev/mapper/cachyos-root",
+                     "type": "lvm",
+                     "fstype": "btrfs",
+                     "size": "100G",
+                     "mountpoint": "/",
+                     "label": null,
+                     "uuid": "root-uuid-2222",
+                     "model": null
+                  },
+                  {
+                     "name": "cachyos-home",
+                     "path": "/dev/mapper/cachyos-home",
+                     "type": "lvm",
+                     "fstype": "xfs",
+                     "size": "800G",
+                     "mountpoint": "/home",
+                     "label": "HOME",
+                     "uuid": "home-uuid-3333",
+                     "model": null
+                  }
+               ]
+            }
+         ]
+      },
+      {
+         "name": "sr0",
+         "path": "/dev/sr0",
+         "type": "rom",
+         "fstype": "iso9660",
+         "size": "7.4G",
+         "mountpoint": null,
+         "label": "INSTALL_DISC",
+         "uuid": "2026-11-21-00-00-00-00",
+         "model": "DVD+-RW_DVD8801"
+      },
+      {
+         "name": "loop0",
+         "path": "/dev/loop0",
+         "type": "loop",
+         "fstype": "squashfs",
+         "size": "128M",
+         "mountpoint": "/snap/core",
+         "label": null,
+         "uuid": null,
+         "model": null
+      }
+   ]
+}

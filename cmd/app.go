@@ -30,6 +30,7 @@ import (
 	"fstab-edit/internal/sysutil"
 	"fstab-edit/internal/writer"
 	"fstab-edit/pkg/models"
+	"fstab-edit/tui"
 )
 
 // defaultTarget — production target по умолчанию. Флаг --file переопределяет
@@ -91,6 +92,11 @@ type AppOptions struct {
 	// Тесты передают путь к YAML в tempdir, чтобы журнал и настройки не
 	// касались системных путей (/var/log, /etc/fstab-edit).
 	DefaultConfigPath string
+	// TuiLauncher запускает TUI вместо production tui.Run; получает
+	// полностью собранные tui.Options. Nil — production tui.Run. Тесты
+	// подменяют заглушкой, чтобы проверить сборку options без запуска
+	// bubbletea-программы.
+	TuiLauncher func(tui.Options) error
 }
 
 // App связывает Cobra root command, глобальные флаги и доменный Service.
@@ -226,6 +232,12 @@ func (a *App) Execute(args []string) int {
 	a.lang = i18n.Resolve(scanLangFlag(args), a.options.Environ(),
 		a.options.Getenv("LC_ALL"), a.options.Getenv("LANG"))
 	a.localize(a.lang)
+	// Запуск без аргументов открывает TUI: пустой argv подменяется на
+	// ["tui"] до парсинга. Явные аргументы (--help, --version, подкоманды)
+	// подмене не подвержены.
+	if len(args) == 0 {
+		args = []string{"tui"}
+	}
 	a.root.SetArgs(args)
 	err := a.root.Execute()
 	// Журнал закрывается после root.Execute: handler'ы дописали события,
@@ -415,6 +427,7 @@ func (a *App) buildRootCommand() *cobra.Command {
 		a.buildVerifyMountCommand(),
 		a.buildBackupCommand(),
 		a.buildRollbackCommand(),
+		a.buildTuiCommand(),
 	)
 	return root
 }

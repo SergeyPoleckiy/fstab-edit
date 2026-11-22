@@ -13,7 +13,7 @@ LDFLAGS := -X main.version=$(VERSION)
 # BINARY — имя собираемого бинарника.
 BINARY := fstab-edit
 
-.PHONY: build install test clean version
+.PHONY: build install test clean version pdf docs
 
 # build собирает статический бинарь с версией из git.
 build:
@@ -35,3 +35,14 @@ clean:
 # version печатает версию, которую получит следующая сборка.
 version:
 	@echo $(VERSION)
+
+# pdf собирает руководство пользователя (docs/user-guide.md) в PDF через
+# pandoc + xelatex; требуются установленные pandoc, xelatex и шрифты GNU FreeFont.
+pdf:
+	pandoc docs/user-guide.md -o docs/user-guide.pdf --pdf-engine=xelatex \
+		-V lang=ru-RU -V mainfont="FreeSerif" -V sansfont="FreeSans" \
+		-V monofont="FreeMono" --toc \
+		--metadata title="fstab-edit — руководство пользователя"
+
+# docs — сборка всей генерируемой документации (сейчас это PDF руководства).
+docs: pdf

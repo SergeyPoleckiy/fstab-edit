@@ -4,10 +4,52 @@
 package validator
 
 import (
+	"slices"
 	"strings"
 
 	"fstab-edit/pkg/models"
 )
+
+// KnownFSTypes — полный перечень поддерживаемых типов файловых систем:
+// все типы ТЗ §6.2 плюс типы, которые валидатор знал до введения общего
+// списка (ntfs3, devtmpfs, cgroup, cgroup2, squashfs, fuse). Список
+// отсортирован и является единым источником для валидации (validateFSType)
+// и автодополнения в TUI, чтобы форма не дублировала перечень.
+var KnownFSTypes = []string{
+	"auto",
+	"bind",
+	"btrfs",
+	"cgroup",
+	"cgroup2",
+	"cifs",
+	"devpts",
+	"devtmpfs",
+	"exfat",
+	"ext2",
+	"ext3",
+	"ext4",
+	"f2fs",
+	"fuse",
+	"iso9660",
+	"msdos",
+	"nfs",
+	"nfs4",
+	"ntfs",
+	"ntfs-3g",
+	"ntfs3",
+	"overlay",
+	"proc",
+	"reiserfs",
+	"smbfs",
+	"squashfs",
+	"sshfs",
+	"swap",
+	"sysfs",
+	"tmpfs",
+	"udf",
+	"vfat",
+	"xfs",
+}
 
 // validateEntry применяет правила в стабильном порядке полей fstab. Специальная
 // проверка выполняется после общей, но пропускается для пустого значения, чтобы
@@ -318,8 +360,10 @@ func addInvalidSource(collector *collector, line int) {
 }
 
 // validateFSType сообщает deprecated smbfs и info о неизвестном nonempty типе.
-// Неизвестность типа не возвращает управление в validateEntry и не отключает
-// остальные проверки; любой fuse.* считается известным без внешнего lookup.
+// Проверка идёт по экспортируемому KnownFSTypes; smbfs обрабатывается раньше
+// списка (deprecated-warning вместо «известен»), а любой fuse.* считается
+// известным без внешнего lookup. Неизвестность типа не возвращает управление
+// в validateEntry и не отключает остальные проверки.
 func validateFSType(collector *collector, entry *models.Entry) {
 	fsType := entry.FSType.Value
 	if fsType == "" {
@@ -339,10 +383,7 @@ func validateFSType(collector *collector, entry *models.Entry) {
 	if strings.HasPrefix(fsType, "fuse.") {
 		return
 	}
-	switch fsType {
-	case "ext2", "ext3", "ext4", "xfs", "btrfs", "vfat", "exfat", "ntfs", "ntfs3",
-		"swap", "tmpfs", "proc", "sysfs", "devtmpfs", "devpts", "cgroup", "cgroup2",
-		"overlay", "squashfs", "iso9660", "udf", "nfs", "nfs4", "cifs", "sshfs", "fuse":
+	if slices.Contains(KnownFSTypes, fsType) {
 		return
 	}
 	collector.add(models.Diagnostic{
