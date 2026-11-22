@@ -57,14 +57,16 @@ title: fstab-edit — руководство пользователя
 git clone https://github.com/SergeyPoleckiy/fstab-edit.git
 cd fstab-edit
 make            # собирает ./fstab-edit
-sudo make install    # сборка + установка бинаря и man-страницы
+sudo make install    # сборка + установка бинаря и man-страниц
 ```
 
 `make install` копирует статический бинарь в `$(PREFIX)/bin`
 (`PREFIX` по умолчанию `/usr/local`, для другого пути —
-`sudo make install PREFIX=/usr`) и man-страницу `fstab-edit(1)` (с gzip,
-как принято в дистрибутивах) в `$(PREFIX)/share/man/man1`. После установки
-полная справка по командам и кодам выхода доступна через `man fstab-edit`.
+`sudo make install PREFIX=/usr`) и man-страницы `fstab-edit(1)` (с gzip,
+как принято в дистрибутивах): английскую — в `$(PREFIX)/share/man/man1`,
+русскую — в `$(PREFIX)/share/man/ru/man1`; `man` сам выбирает страницу
+по локали. После установки полная справка по командам и кодам выхода
+доступна через `man fstab-edit` (или `man -L ru fstab-edit` для русской).
 Для построения пакета или инспекции устанавливаемых файлов поддерживается
 `DESTDIR` (например, `make install DESTDIR=/tmp/stage`); удаление —
 `sudo make uninstall` (с теми же `PREFIX`/`DESTDIR`).

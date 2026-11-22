@@ -57,15 +57,17 @@ system utilities listed in section 2).
 git clone https://github.com/SergeyPoleckiy/fstab-edit.git
 cd fstab-edit
 make            # builds ./fstab-edit
-sudo make install    # build + install of the binary and the man page
+sudo make install    # build + install of the binary and the man pages
 ```
 
 `make install` copies the static binary to `$(PREFIX)/bin`
 (`PREFIX` defaults to `/usr/local`; for another path use
-`sudo make install PREFIX=/usr`) and the `fstab-edit(1)` man page (gzipped,
-as customary in distributions) to `$(PREFIX)/share/man/man1`. After
+`sudo make install PREFIX=/usr`) and the `fstab-edit(1)` man pages (gzipped,
+as customary in distributions): the English page to
+`$(PREFIX)/share/man/man1`, the Russian page to
+`$(PREFIX)/share/man/ru/man1` — `man` picks the page by locale. After
 installation, the full command and exit-code reference is available via
-`man fstab-edit`. `DESTDIR` is supported for package builds or inspecting
+`man fstab-edit` (or `man -L ru fstab-edit` for the Russian page). `DESTDIR` is supported for package builds or inspecting
 the installed files (e.g. `make install DESTDIR=/tmp/stage`); uninstall with
 `sudo make uninstall` (with the same `PREFIX`/`DESTDIR`).
 

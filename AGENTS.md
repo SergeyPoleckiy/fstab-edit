@@ -34,7 +34,7 @@
 ```bash
 make            # сборка ./fstab-edit (версия из git describe через -ldflags)
 make test       # go test ./...
-make install    # бинарь + man-страница (gzip) в $(DESTDIR)$(PREFIX), PREFIX=/usr/local
+make install    # бинарь + man-страницы RU+EN (gzip) в $(DESTDIR)$(PREFIX), PREFIX=/usr/local
 make uninstall  # обратная операция
 make pdf        # user-guide RU+EN → PDF (pandoc + xelatex, шрифты Free*)
 go vet ./... && golangci-lint run && gofmt -l .   # обязательные проверки
@@ -74,7 +74,7 @@ pkg/models/     # модель данных (Entry, Node, Diagnostic, Severity)
 - Темы: dark (default), light, high-contrast, monochrome; выбор через `tui.theme`
   (валидация значения, невалидное → отказ конфигурации, exit 2). Пользовательская
   палитра — `tui.colors` (map роль→цвет, hex #rrggbb / ANSI 0–255 / имена ANSI
-  black…bright_white; 12 ролей; неизвестная роль или формат → отказ, exit 2);
+  black…bright_white; 13 ролей; неизвестная роль или формат → отказ, exit 2);
   применяется поверх любой базовой темы, включая monochrome (переопределяется
   только цвет, атрибуты и текстовые маркеры сохраняются).
 - Версия бинаря — только через `git describe` (Makefile -ldflags); ручной ввод не поддерживается.
