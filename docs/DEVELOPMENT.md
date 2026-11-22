@@ -234,6 +234,9 @@ feature-ветки этапов создаются от `dev` и merge'ятся 
 ├── docs/
 │   ├── user-guide.md     # Руководство пользователя (PDF: make pdf)
 │   ├── DEVELOPMENT.md    # Этот документ
+│   ├── spec/             # ТЗ проекта (v1.0 архив, v2.0 — основа разработки)
+│   ├── stage-1-tz.md     # ТЗ этапа 1
+│   ├── superpowers/      # Планы разработки (только ветка dev)
 │   └── man/
 │       └── fstab-edit.1  # Man-страница (make install ставит её в man1)
 ├── examples/
@@ -241,5 +244,6 @@ feature-ветки этапов создаются от `dev` и merge'ятся 
 │   └── config-full.yaml     # Все ключи конфигурации с пояснениями
 ├── CHANGELOG.md          # История изменений (Keep a Changelog)
 ├── Makefile              # build/install/uninstall/test/pdf/version
-└── README.md             # Обзор проекта для пользователей
+├── AGENTS.md             # Правила проекта для AI-агентов (архитектура, workflow)
+├── README.md             # Обзор проекта для пользователей
 ```

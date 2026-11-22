@@ -5,6 +5,8 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версии проекта следуют [Semantic Versioning](https://semver.org/lang/ru/).
 
+## [Unreleased]
+
 ## [1.3] — 2026-11-22
 
 ### Added

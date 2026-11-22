@@ -47,7 +47,7 @@ go vet ./... && golangci-lint run && gofmt -l .   # обязательные п�
 
 ```
 cmd/            # Cobra: list add edit delete comment uncomment validate verify-mount backup rollback tui
-tui/            # bubbletea: таблица, формы, экраны (diff/monтиров./устройства B/история/журнал/помощь),
+tui/            # bubbletea: таблица, формы, экраны (diff/монтирования/устройства B/история/журнал/помощь),
                 # подсветка синтаксиса и severity, 4 темы, автодополнение (Ctrl+N/Ctrl+P)
 internal/
   parser/       # lossless-парсер fstab (побайтовое сохранение, комментарии)
