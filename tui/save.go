@@ -134,6 +134,9 @@ func (m *model) reloadFromDisk() error {
 	m.session = &sessionState{original: append([]byte(nil), snapshot.Data...)}
 	m.cursor = 0
 	m.loadErr = nil
+	// Диагностики пересчитываются заново: на диске мог оказаться другой
+	// документ (включая restore из истории — он приходит сюда же).
+	m.rebuildDiagnostics()
 	return nil
 }
 

@@ -70,3 +70,41 @@ func TestMarksNotColorOnly(t *testing.T) {
 		t.Fatalf("MarkWarning должен содержать текстовый маркер: %q", got)
 	}
 }
+
+// TestHighlightStylesColored: в dark-теме Field-стили подсветки полей и
+// severity-стили диагностик задают цвет (ТЗ §5.3: подсветка синтаксиса и
+// ошибок/предупреждений цветом).
+func TestHighlightStylesColored(t *testing.T) {
+	th := LoadTheme("dark")
+	for name, st := range map[string]lipgloss.Style{
+		"FieldSource":  th.FieldSource,
+		"FieldMount":   th.FieldMount,
+		"FieldFSType":  th.FieldFSType,
+		"FieldOptions": th.FieldOptions,
+		"SevError":     th.SevError,
+		"SevWarning":   th.SevWarning,
+	} {
+		if !hasForeground(st) {
+			t.Fatalf("dark: %s должен иметь цвет подсветки", name)
+		}
+	}
+}
+
+// TestHighlightStylesMonochromeNoColor: в monochrome-версии Field- и
+// severity-стили совпадают с базовым стилем (без цвета) — подсветка там
+// работает только текстовыми маркерами (ТЗ §9.6).
+func TestHighlightStylesMonochromeNoColor(t *testing.T) {
+	th := LoadTheme("monochrome")
+	for name, st := range map[string]lipgloss.Style{
+		"FieldSource":  th.FieldSource,
+		"FieldMount":   th.FieldMount,
+		"FieldFSType":  th.FieldFSType,
+		"FieldOptions": th.FieldOptions,
+		"SevError":     th.SevError,
+		"SevWarning":   th.SevWarning,
+	} {
+		if hasForeground(st) {
+			t.Fatalf("monochrome: %s не должен иметь цвет", name)
+		}
+	}
+}

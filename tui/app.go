@@ -98,6 +98,11 @@ type model struct {
 	// history — данные экрана истории backup (клавиша H, Task 6):
 	// заполняются синхронно в момент входа на экран.
 	history historyModel
+	// severityByLine — кэш наихудшей severity диагностики валидатора по
+	// физической строке документа (0/отсутствие — диагностик нет; info не
+	// кэшируется). Пересчитывается rebuildDiagnostics на load/mutation/undo/
+	// reload; рендер таблицы только читает, валидатор в View не вызывается.
+	severityByLine map[int]models.Severity
 }
 
 // deps возвращает границы отказа модели: явно заданные через Options.Deps
@@ -129,6 +134,9 @@ func NewModel(opts Options) tea.Model {
 	}
 	m.document = parser.Parse(snapshot.Data)
 	m.session = &sessionState{original: append([]byte(nil), snapshot.Data...)}
+	// Кэш диагностик считается сразу после загрузки: первая отрисовка таблицы
+	// уже показывает маркеры "!"/"?" проблемных строк.
+	m.rebuildDiagnostics()
 	return m
 }
 
