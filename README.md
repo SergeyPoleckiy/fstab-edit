@@ -111,7 +111,7 @@ go build -o fstab-edit .
 
 Форма записи (Ins/Enter) поддерживает автодополнение (ТЗ §5.3): панель подсказок фильтруется по префиксу для полей «Тип ФС» и «Опции», а поле «Устройство» показывает все устройства без фильтрации; `Ctrl+N`/`Ctrl+P` листают варианты и подставляют выбранный в поле. Для устройств подставляемое значение выбирается по приоритету `UUID=` → `LABEL=` → `/dev/...` (устойчиво к переименованию дисков), список берётся из `lsblk`; при недоступности `lsblk` форма работает без подсказок устройств. Набор опций зависит от типа ФС (бессмысленные сочетания, например `discard` для сетевых ФС, исключаются).
 
-Тема оформления — `tui.theme` в конфигурации: `dark` (по умолчанию) или `monochrome`; ошибки и предупреждения помечаются текстовыми маркерами (`!`, `?`) во всех темах. Язык интерфейса — общий резолв `--lang`/`FSTAB_EDIT_LANG`/локаль.
+Тема оформления — `tui.theme` в конфигурации: `dark` (по умолчанию), `light`, `high-contrast` (усиленная контрастность для плохого зрения/проектора) или `monochrome`; неизвестное значение отклоняется ошибкой конфигурации (exit code 2). Ошибки и предупреждения помечаются текстовыми маркерами (`!`, `?`) во всех темах. Язык интерфейса — общий резолв `--lang`/`FSTAB_EDIT_LANG`/локаль.
 
 Ограничения: мышь не поддерживается (только клавиатура); расширенные экраны этапа 4 ТЗ — будущая работа. Документация пользователя: [docs/user-guide.md](docs/user-guide.md); PDF-версия собирается командой `make pdf` (pandoc + xelatex).
 
@@ -122,7 +122,7 @@ go build -o fstab-edit .
 - Пути автоматической загрузки: system — `/etc/fstab-edit/config.yaml` (требует root-ownership), user — `~/.config/fstab-edit/config.yaml`. Root-процесс (euid 0) user-config автоматически не загружает (ТЗ §13.2).
 - `--config <path>` задаёт явный YAML вместо system/user; env всё равно выше его.
 - Env-переменные: `FSTAB_EDIT_FILE`, `FSTAB_EDIT_BACKUP_DIR`, `FSTAB_EDIT_LOG_LEVEL`, `FSTAB_EDIT_LANG`, `FSTAB_EDIT_OUTPUT`. Неизвестные `FSTAB_EDIT_*` печатают `warning: ...` в stderr и игнорируются.
-- YAML-схема (ТЗ §13.3): `fstab_path`, `backup.dir|prefix|keep`, `log.file|level|max_size_mb|keep`, `tui.theme`. Язык и формат вывода из YAML не читаются (только env/CLI). Ключ `tui.theme` задаёт оформление TUI (`dark` — по умолчанию, `monochrome`).
+- YAML-схема (ТЗ §13.3): `fstab_path`, `backup.dir|prefix|keep`, `log.file|level|max_size_mb|keep`, `tui.theme`. Язык и формат вывода из YAML не читаются (только env/CLI). Ключ `tui.theme` задаёт оформление TUI (`dark` — по умолчанию, `light`, `high-contrast`, `monochrome`).
 - Security-checks (ТЗ §13.2): symlink-конфигурация отклоняется, файл не должен быть group/others-writable (иначе exit code 3), system-config обязан принадлежать root, user/explicit — effective UID. Некорректный YAML или значения — exit code 2.
 
 ## Журналирование

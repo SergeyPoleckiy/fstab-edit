@@ -52,6 +52,44 @@ func TestLoadThemeMonochromeNoColor(t *testing.T) {
 	}
 }
 
+// TestLoadThemeLightAndHighContrast проверяет, что светлая и high-contrast
+// темы собираются из своих палитр (ТЗ §9.6: четыре темы — dark, light,
+// high-contrast, monochrome): базовые и Field-стили непустые и задают цвет.
+func TestLoadThemeLightAndHighContrast(t *testing.T) {
+	for _, name := range []string{"light", "high-contrast"} {
+		th := LoadTheme(name)
+		for styleName, st := range map[string]lipgloss.Style{
+			"Title":        th.Title,
+			"Header":       th.Header,
+			"Selected":     th.Selected,
+			"Info":         th.Info,
+			"FieldSource":  th.FieldSource,
+			"FieldMount":   th.FieldMount,
+			"FieldFSType":  th.FieldFSType,
+			"FieldOptions": th.FieldOptions,
+		} {
+			if !hasForeground(st) {
+				t.Fatalf("%s: %s должен иметь цвет", name, styleName)
+			}
+		}
+	}
+}
+
+// TestSeverityColorsInAllColoredThemes проверяет, что severity-стили
+// диагностик задают цвет во всех трёх цветных темах (ТЗ §5.3): SevError —
+// красный, SevWarning — жёлтый/оранжевый, читаемый на фоне темы.
+func TestSeverityColorsInAllColoredThemes(t *testing.T) {
+	for _, name := range []string{"dark", "light", "high-contrast"} {
+		th := LoadTheme(name)
+		if !hasForeground(th.SevError) {
+			t.Fatalf("%s: SevError должен иметь цвет", name)
+		}
+		if !hasForeground(th.SevWarning) {
+			t.Fatalf("%s: SevWarning должен иметь цвет", name)
+		}
+	}
+}
+
 // TestLoadThemeUnknownFallsBackDark проверяет откат неизвестной темы на dark.
 func TestLoadThemeUnknownFallsBackDark(t *testing.T) {
 	if !hasForeground(LoadTheme("nonsense").Title) {

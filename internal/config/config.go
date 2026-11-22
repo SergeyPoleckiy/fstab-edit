@@ -286,6 +286,14 @@ func validateValues(s *Settings) error {
 			return fmt.Errorf("некорректный output %q: допустимы table, json, csv, tsv", s.Output)
 		}
 	}
+	// ТЗ §5.5/§9.6: оформление TUI выбирается ключом tui.theme; допустимые
+	// имена совпадают с множеством тем пакета tui (LoadTheme). Пустое значение
+	// невозможно: Default() задаёт "dark", а merge вливает только непустые ключи.
+	switch s.TUITheme {
+	case "dark", "light", "high-contrast", "monochrome":
+	default:
+		return fmt.Errorf("некорректный tui.theme %q: допустимы dark, light, high-contrast, monochrome", s.TUITheme)
+	}
 	if s.LogMaxSizeMB <= 0 || s.LogKeep <= 0 || s.BackupKeep <= 0 {
 		return errors.New("keep/max_size_mb должны быть положительными")
 	}

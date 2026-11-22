@@ -48,7 +48,7 @@ const (
 type Options struct {
 	Target string // target fstab (default /etc/fstab, --file переопределяет)
 	Lang   string // резолвленный язык ru|en
-	Theme  string // tui.theme из config: "dark" (default) | "monochrome"
+	Theme  string // tui.theme из config: "dark" (default) | "light" | "high-contrast" | "monochrome"
 	Backup BackupSettings
 	Log    LogSettings
 	Runner sysutil.CommandRunner // findmnt; тесты подменяют
