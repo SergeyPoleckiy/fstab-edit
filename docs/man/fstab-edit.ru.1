@@ -241,6 +241,22 @@ mount point.
 .IR dark ", " light ", " high\-contrast " или " monochrome
 (по умолчанию:
 .IR dark ).
+.TP
+.BI tui.colors
+Переопределение цветов по ролям поверх
+.BR tui.theme
+(работает и с
+.IR monochrome ).
+Форматы цвета: hex
+.IR #rrggbb ,
+номер ANSI 0\(en255 или имя ANSI\-цвета
+.RI ( black ", " red ", " green ", " yellow ", " blue ", " magenta ", " cyan ", " white
+и их варианты
+.IR bright_ ).
+Роли:
+.IR title ", " header ", " selected_fg ", " selected_bg ", " muted ", " info ", " dirty ", " error ", " warning ", " field_source ", " field_mount ", " field_fstype " или " field_options .
+Неизвестная роль или невалидный цвет отклоняются при запуске
+(код выхода 2).
 .SH ФАЙЛЫ
 .TP
 .B ~/.config/fstab\-edit/config.yaml
