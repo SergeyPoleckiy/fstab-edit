@@ -5,7 +5,7 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версии проекта следуют [Semantic Versioning](https://semver.org/lang/ru/).
 
-## [Unreleased]
+## [1.3] — 2026-11-22
 
 ### Added
 
@@ -92,6 +92,7 @@
   журнал с rotation и redaction секретов, локализация RU/EN.
 - Версия бинаря через `git describe`.
 
-[Unreleased]: https://github.com/SergeyPoleckiy/fstab-edit/compare/v1.2...HEAD
+[Unreleased]: https://github.com/SergeyPoleckiy/fstab-edit/compare/v1.3...HEAD
+[1.3]: https://github.com/SergeyPoleckiy/fstab-edit/compare/v1.2...v1.3
 [1.2]: https://github.com/SergeyPoleckiy/fstab-edit/compare/v1.0...v1.2
 [1.0]: https://github.com/SergeyPoleckiy/fstab-edit/releases/tag/v1.0
