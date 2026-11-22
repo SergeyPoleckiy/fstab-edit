@@ -7,8 +7,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // testLookupUser подменяет LookupUser: uid 0 → root с home из tempdir,
@@ -40,6 +43,17 @@ func writeUserConfig(t *testing.T, home, content string) string {
 		t.Fatal(err)
 	}
 	return writeConfig(t, dir, "config.yaml", content)
+}
+
+// parseFileConfig декодирует YAML-фрагмент в fileConfig; нужен unit-тестам
+// слияния уровней (mergeFileConfig), которым файловая система не требуется.
+func parseFileConfig(t *testing.T, content string) *fileConfig {
+	t.Helper()
+	var fc fileConfig
+	if err := yaml.Unmarshal([]byte(content), &fc); err != nil {
+		t.Fatalf("parseFileConfig %q: %v", content, err)
+	}
+	return &fc
 }
 
 // stubSystemConfig перенаправляет systemConfigPath в несуществующий файл
@@ -189,7 +203,7 @@ func TestLoadUnknownEnvWarns(t *testing.T) {
 	if !strings.Contains(warnings[0], "FSTAB_EDIT_FOO") {
 		t.Fatalf("warning не упоминает переменную: %q", warnings[0])
 	}
-	if s != Default() {
+	if !reflect.DeepEqual(s, Default()) {
 		t.Fatalf("Settings изменились: %+v", s)
 	}
 }
@@ -417,5 +431,192 @@ func TestLookupHomeByEffectiveUID(t *testing.T) {
 	}
 	if s.FstabPath != "/from-passwd-home" {
 		t.Fatalf("FstabPath: got %q, want user config из home LookupUser", s.FstabPath)
+	}
+}
+
+// TestLoadTUIColorsValid проверяет, что tui.colors со всеми двенадцатью
+// ролями и всеми тремя форматами цвета (hex #rrggbb любого регистра, номер
+// ANSI 0–255, имя ANSI-цвета включая bright-варианты) принимается валидацией
+// и резолвится в Settings.TUIColors без изменений (имена не нормализуются:
+// конвертация в номера — при применении в tui.LoadTheme).
+func TestLoadTUIColorsValid(t *testing.T) {
+	stubSystemConfig(t)
+	yaml := `
+tui:
+  theme: dark
+  colors:
+    title: "#00ffff"
+    header: "#FF00AA"
+    selected_fg: "0"
+    selected_bg: "255"
+    muted: black
+    info: bright_white
+    dirty: red
+    error: "196"
+    warning: bright_red
+    field_source: "#abcdef"
+    field_mount: "28"
+    field_fstype: bright_yellow
+    field_options: "007"
+`
+	s, _, err := Load(LoadOptions{
+		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", yaml),
+		Environ:      nil,
+		EUID:         1000,
+		LookupUser:   testLookupUser(t.TempDir()),
+	})
+	if err != nil {
+		t.Fatalf("валидная палитра должна приниматься: %v", err)
+	}
+	want := map[string]string{
+		"title": "#00ffff", "header": "#FF00AA", "selected_fg": "0",
+		"selected_bg": "255", "muted": "black", "info": "bright_white",
+		"dirty": "red", "error": "196", "warning": "bright_red",
+		"field_source": "#abcdef", "field_mount": "28",
+		"field_fstype": "bright_yellow", "field_options": "007",
+	}
+	if !reflect.DeepEqual(s.TUIColors, want) {
+		t.Fatalf("TUIColors = %+v, want %+v", s.TUIColors, want)
+	}
+}
+
+// TestLoadTUIColorsEmptyMapValid проверяет, что пустой блок colors валиден:
+// он материализуется в пустую мапу (не nil — ключ был задан явно), что
+// эквивалентно отсутствию переопределений.
+func TestLoadTUIColorsEmptyMapValid(t *testing.T) {
+	stubSystemConfig(t)
+	s, _, err := Load(LoadOptions{
+		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  colors: {}\n"),
+		Environ:      nil,
+		EUID:         1000,
+		LookupUser:   testLookupUser(t.TempDir()),
+	})
+	if err != nil {
+		t.Fatalf("пустой tui.colors должен приниматься: %v", err)
+	}
+	if s.TUIColors == nil || len(s.TUIColors) != 0 {
+		t.Fatalf("TUIColors = %+v, want пустая не-nil мапа", s.TUIColors)
+	}
+}
+
+// TestLoadTUIColorsInvalid проверяет табличные отказы валидации tui.colors:
+// неизвестная роль (в любом регистре) и цвета невалидного формата — частичные
+// hex (#rgb, 5/8 цифр, не-hex символы), числа вне 0–255, строки с не-цифрами,
+// неизвестные имена, регистр имён, пробелы, пустые значения. Каждый кейс даёт
+// *TUIColorError с причиной и отклонённой парой.
+func TestLoadTUIColorsInvalid(t *testing.T) {
+	cases := []struct {
+		name   string
+		yaml   string
+		reason TUIColorReason
+		role   string
+		value  string
+	}{
+		{"неизвестная роль", "tui:\n  colors:\n    nonsense: red\n", TUIColorUnknownRole, "nonsense", "red"},
+		{"роль в верхнем регистре", "tui:\n  colors:\n    Title: red\n", TUIColorUnknownRole, "Title", "red"},
+		{"роль severity", "tui:\n  colors:\n    sev_error: red\n", TUIColorUnknownRole, "sev_error", "red"},
+		{"hex сокращённый #rgb", "tui:\n  colors:\n    title: \"#0f0\"\n", TUIColorInvalidColor, "title", "#0f0"},
+		{"hex пять цифр", "tui:\n  colors:\n    title: \"#00ff0\"\n", TUIColorInvalidColor, "title", "#00ff0"},
+		{"hex восемь цифр", "tui:\n  colors:\n    title: \"#00ff00f\"\n", TUIColorInvalidColor, "title", "#00ff00f"},
+		{"hex не-hex символ", "tui:\n  colors:\n    title: \"#00ff0g\"\n", TUIColorInvalidColor, "title", "#00ff0g"},
+		{"hex без решётки", "tui:\n  colors:\n    title: 00ff00\n", TUIColorInvalidColor, "title", "00ff00"},
+		{"номер 256", "tui:\n  colors:\n    title: \"256\"\n", TUIColorInvalidColor, "title", "256"},
+		{"отрицательный номер", "tui:\n  colors:\n    title: \"-1\"\n", TUIColorInvalidColor, "title", "-1"},
+		{"номер со знаком", "tui:\n  colors:\n    title: \"+5\"\n", TUIColorInvalidColor, "title", "+5"},
+		{"номер с буквой", "tui:\n  colors:\n    title: \"12a\"\n", TUIColorInvalidColor, "title", "12a"},
+		{"пустое значение", "tui:\n  colors:\n    title: \"\"\n", TUIColorInvalidColor, "title", ""},
+		{"неизвестное имя", "tui:\n  colors:\n    title: gray\n", TUIColorInvalidColor, "title", "gray"},
+		{"имя в CamelCase", "tui:\n  colors:\n    title: Bright_Red\n", TUIColorInvalidColor, "title", "Bright_Red"},
+		{"имя с пробелом", "tui:\n  colors:\n    title: \"red \"\n", TUIColorInvalidColor, "title", "red "},
+		{"пробел перед номером", "tui:\n  colors:\n    title: \" 12\"\n", TUIColorInvalidColor, "title", " 12"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubSystemConfig(t)
+			_, _, err := Load(LoadOptions{
+				ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", tc.yaml),
+				Environ:      nil,
+				EUID:         1000,
+				LookupUser:   testLookupUser(t.TempDir()),
+			})
+			if err == nil {
+				t.Fatalf("ожидался отказ валидации tui.colors (%s)", tc.name)
+			}
+			var colorErr *TUIColorError
+			if !errors.As(err, &colorErr) {
+				t.Fatalf("ошибка должна быть *TUIColorError, got: %T %v", err, err)
+			}
+			if colorErr.Reason != tc.reason {
+				t.Fatalf("Reason = %q, want %q", colorErr.Reason, tc.reason)
+			}
+			if colorErr.Role != tc.role || colorErr.Value != tc.value {
+				t.Fatalf("отклонённая пара = (%q, %q), want (%q, %q)",
+					colorErr.Role, colorErr.Value, tc.role, tc.value)
+			}
+		})
+	}
+}
+
+// TestLoadInvalidTUIColorsMessage проверяет, что сообщения об отказе палитры
+// содержат отклонённую роль/значение и (для неизвестной роли) полный список
+// допустимых ролей — пользователь должен понять причину без чтения кода.
+func TestLoadInvalidTUIColorsMessage(t *testing.T) {
+	stubSystemConfig(t)
+	_, _, err := Load(LoadOptions{
+		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  colors:\n    nonsense: red\n"),
+		Environ:      nil,
+		EUID:         1000,
+		LookupUser:   testLookupUser(t.TempDir()),
+	})
+	if err == nil {
+		t.Fatal("ожидался отказ на неизвестную роль")
+	}
+	msg := err.Error()
+	for _, want := range []string{"nonsense", "title", "header", "selected_fg", "field_options"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("сообщение должно содержать %q: %q", want, msg)
+		}
+	}
+
+	stubSystemConfig(t)
+	_, _, err = Load(LoadOptions{
+		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  colors:\n    title: \"#0f0\"\n"),
+		Environ:      nil,
+		EUID:         1000,
+		LookupUser:   testLookupUser(t.TempDir()),
+	})
+	if err == nil {
+		t.Fatal("ожидался отказ на невалидный формат")
+	}
+	msg = err.Error()
+	for _, want := range []string{"#0f0", "title", "#rrggbb"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("сообщение должно содержать %q: %q", want, msg)
+		}
+	}
+}
+
+// TestMergeFileConfigTUIColorsMergesLevels проверяет послойное слияние
+// tui.colors: роль, заданная на старшем уровне, переопределяет значение
+// нижележащего уровня, а не заданные на старшем уровне роли сохраняются
+// (тот же принцип «отсутствующий ключ не затирает», что и для скаляров).
+func TestMergeFileConfigTUIColorsMergesLevels(t *testing.T) {
+	s := Default()
+	system := parseFileConfig(t, "tui:\n  colors:\n    error: \"196\"\n    title: \"#111111\"\n")
+	user := parseFileConfig(t, "tui:\n  colors:\n    title: \"#00ffff\"\n")
+	mergeFileConfig(&s, system)
+	mergeFileConfig(&s, user)
+	if s.TUIColors["title"] != "#00ffff" {
+		t.Fatalf("title = %q, want user-значение #00ffff", s.TUIColors["title"])
+	}
+	if s.TUIColors["error"] != "196" {
+		t.Fatalf("error = %q, want system-значение 196 (user-уровень его не затирал)", s.TUIColors["error"])
+	}
+	// Без colors на всех уровнях мапа остаётся nil: LoadTheme применяет
+	// встроенную палитру без изменений.
+	plain := Default()
+	mergeFileConfig(&plain, parseFileConfig(t, "tui:\n  theme: light\n"))
+	if plain.TUIColors != nil {
+		t.Fatalf("TUIColors = %+v, want nil без ключа colors", plain.TUIColors)
 	}
 }

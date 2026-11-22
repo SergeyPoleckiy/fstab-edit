@@ -57,7 +57,7 @@ internal/
   transaction/  # оркестрация записи: backup → findmnt → replace → verify → auto-rollback
   backup/       # копии со sidecar JSON (backup_id, sha256, operation), ротация (keep 10)
   sysutil/      # CommandRunner (seam), findmnt-verifier, lsblk/blkid-парсеры
-  config/       # YAML: fstab_path, backup.*, log.*, tui.theme; security-checks
+  config/       # YAML: fstab_path, backup.*, log.*, tui.theme, tui.colors; security-checks
   logger/       # JSON Lines-журнал, rotation, redaction
   i18n/         # каталоги RU/EN (парность проверяет TestCatalogParity)
   cliapp/       # сервисный слой CLI, exit codes 0–8, интерактивный chooser
@@ -72,7 +72,11 @@ pkg/models/     # модель данных (Entry, Node, Diagnostic, Severity)
 - TUI не запускается без TTY (usage error, exit 2); без аргументов открывает TUI.
 - Интерактивный chooser при неоднозначном селекторе (код 8 при отказе/вне TTY с --yes).
 - Темы: dark (default), light, high-contrast, monochrome; выбор через `tui.theme`
-  (валидация значения, невалидное → отказ конфигурации, exit 2).
+  (валидация значения, невалидное → отказ конфигурации, exit 2). Пользовательская
+  палитра — `tui.colors` (map роль→цвет, hex #rrggbb / ANSI 0–255 / имена ANSI
+  black…bright_white; 12 ролей; неизвестная роль или формат → отказ, exit 2);
+  применяется поверх любой базовой темы, включая monochrome (переопределяется
+  только цвет, атрибуты и текстовые маркеры сохраняются).
 - Версия бинаря — только через `git describe` (Makefile -ldflags); ручной ввод не поддерживается.
 
 ## Правила разработки
@@ -94,7 +98,8 @@ pkg/models/     # модель данных (Entry, Node, Diagnostic, Severity)
 
 ## Отложено (defer, не блокирует релизы)
 
-Кастомные палитры цветов через YAML; английская версия руководства (user-guide.en.md);
+Кастомные палитры цветов через YAML — реализовано (`tui.colors`, этап 5);
+английская версия руководства (user-guide.en.md);
 описания назначения опций в подсказках формы; пакеты .deb/.rpm/.pkg.tar.zst;
 перфоманс (кэш рендера таблицы, updateScrollable O(n), loadLog целиком,
 синхронные lsblk/restore без таймаута).

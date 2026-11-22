@@ -183,24 +183,111 @@ func newTheme(p palette) Theme {
 
 // LoadTheme возвращает тему по имени (ТЗ §9.6: допустимые имена — dark,
 // light, high-contrast, monochrome; config-валидация отклоняет прочие имена
-// раньше, до вызова). Пустое и неизвестное имя дают dark — защитный fallback:
-// public API пакета tui не должен падать, даже если валидирующий слой
-// (internal/config) по какой-то причине пропустил недопустимое имя.
-func LoadTheme(name string) Theme {
+// раньше, до вызова) с применёнными поверх неё пользовательскими
+// переопределениями ролей палитры (ТЗ v2 этап 4: «пользовательские темы»
+// через tui.colors). overrides может быть nil или пустым — тогда результат
+// совпадает с встроенной темой. Пустое и неизвестное имя дают dark —
+// защитный fallback: public API пакета tui не должен падать, даже если
+// валидирующий слой (internal/config) по какой-то причине пропустил
+// недопустимое имя; неизвестные роли в overrides игнорируются по той же
+// причине (формат валидирует internal/config, здесь — best-effort).
+// Переопределения применяются и к monochrome: пользователь, задавший
+// tui.colors, явно запросил цвета даже в теме без встроенной палитры —
+// цвет добавляется к атрибутам (reverse/bold/underline сохраняются).
+func LoadTheme(name string, overrides map[string]string) Theme {
+	var th Theme
 	switch name {
 	case "monochrome":
-		th := newTheme(monochromePalette)
+		th = newTheme(monochromePalette)
 		// Предупреждение в monochrome различается подчёркиванием: цвета нет,
 		// а иерархия «ошибка bold / предупреждение underline» сохраняется.
 		th.Warning = lipgloss.NewStyle().Underline(true)
-		return th
 	case "light":
-		return newTheme(lightPalette)
+		th = newTheme(lightPalette)
 	case "high-contrast":
-		return newTheme(highContrastPalette)
+		th = newTheme(highContrastPalette)
 	default:
-		return newTheme(darkPalette)
+		th = newTheme(darkPalette)
 	}
+	return applyOverrides(th, overrides)
+}
+
+// ansiColorNames — резолв имён ANSI-цветов в номера 0–15. Используемая
+// библиотека (lipgloss v1 через termenv v0.15) принимает только hex #rrggbb
+// и десятичные номера, поэтому имя конвертируется в номер до сборки стиля —
+// иначе цвет молча не применился бы. Список зеркалит ansiColorNames пакета
+// internal/config (валидация tui.colors): форматы слоёв не расходятся.
+var ansiColorNames = map[string]string{
+	"black":          "0",
+	"red":            "1",
+	"green":          "2",
+	"yellow":         "3",
+	"blue":           "4",
+	"magenta":        "5",
+	"cyan":           "6",
+	"white":          "7",
+	"bright_black":   "8",
+	"bright_red":     "9",
+	"bright_green":   "10",
+	"bright_yellow":  "11",
+	"bright_blue":    "12",
+	"bright_magenta": "13",
+	"bright_cyan":    "14",
+	"bright_white":   "15",
+}
+
+// resolveColorValue преобразует значение роли tui.colors в строку, понятную
+// lipgloss: имя ANSI-цвета → номер, hex и номер проходят без изменений.
+func resolveColorValue(value string) string {
+	if n, ok := ansiColorNames[value]; ok {
+		return n
+	}
+	return value
+}
+
+// applyOverrides применяет пользовательские переопределения ролей палитры
+// поверх собранной темы. Значение каждой роли — hex #rrggbb, номер ANSI
+// 0–255 или имя ANSI-цвета; формат гарантирует internal/config, здесь
+// применение best-effort и неизвестные роли игнорируются. Переопределяется
+// только цвет: атрибуты стилей (bold/faint/underline/reverse) сохраняются,
+// поэтому иерархия и текстовые признаки темы (ТЗ §9.4) не ломаются.
+// selected_fg/selected_bg — единственные роли, адресующие не целый стиль,
+// а его часть: они меняют Foreground/Background стиля Selected поверх
+// собранного (включая Reverse monochrome: цвет добавляется к инверсии).
+func applyOverrides(th Theme, overrides map[string]string) Theme {
+	for role, value := range overrides {
+		c := lipgloss.Color(resolveColorValue(value))
+		switch role {
+		case "title":
+			th.Title = th.Title.Foreground(c)
+		case "header":
+			th.Header = th.Header.Foreground(c)
+		case "selected_fg":
+			th.Selected = th.Selected.Foreground(c)
+		case "selected_bg":
+			th.Selected = th.Selected.Background(c)
+		case "muted":
+			th.Muted = th.Muted.Foreground(c)
+		case "info":
+			th.Info = th.Info.Foreground(c)
+		case "dirty":
+			th.Dirty = th.Dirty.Foreground(c)
+		case "error":
+			th.Error = th.Error.Foreground(c)
+		case "warning":
+			th.Warning = th.Warning.Foreground(c)
+		case "field_source":
+			th.FieldSource = th.FieldSource.Foreground(c)
+		case "field_mount":
+			th.FieldMount = th.FieldMount.Foreground(c)
+		case "field_fstype":
+			th.FieldFSType = th.FieldFSType.Foreground(c)
+		case "field_options":
+			th.FieldOptions = th.FieldOptions.Foreground(c)
+		}
+		// Неизвестная роль игнорируется: защитный best-effort public API.
+	}
+	return th
 }
 
 // MarkError добавляет текстовый маркер ошибки "!": ТЗ §9.4 запрещает опираться

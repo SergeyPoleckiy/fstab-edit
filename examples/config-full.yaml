@@ -48,6 +48,18 @@ tui:
   # (default: dark). Неизвестное имя отклоняется ошибкой конфигурации.
   # Влияет только на TUI, на CLI не действует.
   theme: dark
+  # Пользовательская палитра (ТЗ v2 этап 4, необязательно): переопределение
+  # цветов отдельных ролей поверх выбранной встроенной темы, включая
+  # monochrome. Формат значения: hex #rrggbb ("#00ffff"), номер ANSI 0–255
+  # ("196") или имя ANSI-цвета (black..white, bright_black..bright_white).
+  # Неизвестная роль или невалидный формат цвета отклоняются ошибкой
+  # конфигурации (exit code 2). Роли: title, header, selected_fg, selected_bg,
+  # muted, info, dirty, error, warning, field_source, field_mount,
+  # field_fstype, field_options.
+  # colors:
+  #   title: "#00ffff"
+  #   selected_fg: "0"
+  #   error: red
 
 # Язык (ru|en) и формат вывода (table|json|csv|tsv) из YAML НЕ читаются
 # (ТЗ §13.3): они задаются только через env (FSTAB_EDIT_LANG, FSTAB_EDIT_OUTPUT)

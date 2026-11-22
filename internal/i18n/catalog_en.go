@@ -57,6 +57,11 @@ var catalogEN = map[string]string{
 	"config.invalid":   "configuration %s is invalid",
 	"error.log.open":   "open log file %s",
 	"error.tui.launch": "launch TUI: %s",
+	// --- tui.colors validation keys (stage 5, Task 3): palette rejection ---
+	// detail args: role, configuration path, comma-separated list of valid roles.
+	"config.bad_tui_color_role": "unknown tui.colors role %q in configuration %s: valid roles: %s",
+	// detail args: color value, role, configuration path.
+	"config.bad_tui_color_value": "invalid color %q for tui.colors role %q in configuration %s: expected hex #rrggbb, an ANSI number 0–255 or an ANSI color name",
 
 	// --- Ключи cmd help (Task 5): Short/Long команд и usage флагов ---
 	// EN-значения — перевод RU-каталога; ключи и порядок зеркальны catalogRU.

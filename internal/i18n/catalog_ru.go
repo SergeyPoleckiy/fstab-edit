@@ -57,6 +57,11 @@ var catalogRU = map[string]string{
 	"config.invalid":   "конфигурация %s некорректна",
 	"error.log.open":   "открыть журнал %s",
 	"error.tui.launch": "запустить TUI: %s",
+	// --- Ключи валидации tui.colors (этап 5, Task 3): отказ палитры ---
+	// detail-аргументы: роль, путь конфигурации, список допустимых ролей.
+	"config.bad_tui_color_role": "неизвестная роль цвета tui.colors %q в конфигурации %s: допустимые роли: %s",
+	// detail-аргументы: значение цвета, роль, путь конфигурации.
+	"config.bad_tui_color_value": "некорректный цвет %q для роли tui.colors %q в конфигурации %s: допустимы hex #rrggbb, номер ANSI 0–255 или имя ANSI-цвета",
 
 	// --- Ключи cmd help (Task 5): Short/Long команд и usage флагов ---
 	// RU-значения дословно повторяют текущие строки cmd; EN — перевод.

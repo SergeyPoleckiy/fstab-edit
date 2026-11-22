@@ -39,8 +39,13 @@ type Settings struct {
 	LogMaxSizeMB int
 	LogKeep      int
 	TUITheme     string // сохраняется, на CLI не влияет
-	Lang         string // только env/CLI: ru|en
-	Output       string // только env/CLI: table|json|csv|tsv
+	// TUIColors — переопределения ролей палитры из tui.colors (ТЗ v2 этап 4,
+	// пользовательские темы); nil = ключ colors не задан ни на одном уровне
+	// и встроенная палитра темы применяется без изменений. Исходные строки
+	// пользователя: конвертация имён ANSI в номера — при применении в tui.
+	TUIColors map[string]string
+	Lang      string // только env/CLI: ru|en
+	Output    string // только env/CLI: table|json|csv|tsv
 }
 
 // fileConfig — зеркало YAML-схемы ТЗ §13.3; все поля указатели/omitempty-
@@ -59,7 +64,8 @@ type fileConfig struct {
 		Keep      *int    `yaml:"keep"`
 	} `yaml:"log"`
 	TUI *struct {
-		Theme *string `yaml:"theme"`
+		Theme  *string            `yaml:"theme"`
+		Colors *map[string]string `yaml:"colors"`
 	} `yaml:"tui"`
 }
 
@@ -234,8 +240,24 @@ func mergeFileConfig(s *Settings, fc *fileConfig) {
 			s.LogKeep = *fc.Log.Keep
 		}
 	}
-	if fc.TUI != nil && fc.TUI.Theme != nil {
-		s.TUITheme = *fc.TUI.Theme
+	if fc.TUI != nil {
+		if fc.TUI.Theme != nil {
+			s.TUITheme = *fc.TUI.Theme
+		}
+		if fc.TUI.Colors != nil {
+			// Слияние по элементам: роли, заданные на этом уровне,
+			// переопределяют значения нижележащего уровня, не заданные здесь
+			// роли сохраняются (тот же принцип «отсутствующий ключ не затирает
+			// значение», что и для скаляров). Мапа материализуется лениво:
+			// пока colors не задан ни на одном уровне, s.TUIColors остаётся
+			// nil и LoadTheme применяет встроенную палитру без изменений.
+			if s.TUIColors == nil {
+				s.TUIColors = make(map[string]string, len(*fc.TUI.Colors))
+			}
+			for role, color := range *fc.TUI.Colors {
+				s.TUIColors[role] = color
+			}
+		}
 	}
 }
 
@@ -293,6 +315,13 @@ func validateValues(s *Settings) error {
 	case "dark", "light", "high-contrast", "monochrome":
 	default:
 		return fmt.Errorf("некорректный tui.theme %q: допустимы dark, light, high-contrast, monochrome", s.TUITheme)
+	}
+	// ТЗ v2 этап 4 (пользовательские темы): tui.colors — переопределения ролей
+	// палитры поверх встроенной темы. Ключ опционален; неизвестная роль или
+	// цвет невалидного формата отклоняются явной ошибкой TUIColorError —
+	// cmd-слой маппит её на локализованное сообщение и exit code 2.
+	if err := validateTUIColors(s.TUIColors); err != nil {
+		return err
 	}
 	if s.LogMaxSizeMB <= 0 || s.LogKeep <= 0 || s.BackupKeep <= 0 {
 		return errors.New("keep/max_size_mb должны быть положительными")

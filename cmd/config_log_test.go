@@ -481,3 +481,35 @@ func TestMutationDurationMeasured(t *testing.T) {
 		t.Fatalf("duration_ms = %v, want 1 (инъектируемый Now)", events[0]["duration_ms"])
 	}
 }
+
+// TestInvalidTUIColorPaletteRejected проверяет, что неизвестная роль или
+// невалидный формат цвета в tui.colors отклоняются кодом 2 с локализованным
+// сообщением, называющим отклонённую пару, и target остаётся неизменным.
+func TestInvalidTUIColorPaletteRejected(t *testing.T) {
+	cases := []struct {
+		name   string
+		yaml   string
+		detail string
+	}{
+		{"неизвестная роль", "tui:\n  colors:\n    nonsense: red\n", "неизвестная роль цвета tui.colors \"nonsense\""},
+		{"невалидный цвет", "tui:\n  colors:\n    title: \"#0f0\"\n", "некорректный цвет \"#0f0\" для роли tui.colors \"title\""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := writeTempTarget(t, e2eFixture)
+			configPath := writeTestConfig(t, tc.yaml)
+
+			buffers := &appBuffers{}
+			app := newConfigApp(buffers, configPath, nil, strings.NewReader(""), false)
+			if code := app.Execute(addArgs(target, "--yes")); code != 2 {
+				t.Fatalf("code = %d, want 2; stderr: %s", code, buffers.stderr.String())
+			}
+			if !strings.Contains(buffers.stderr.String(), tc.detail) {
+				t.Fatalf("stderr должен содержать %q: %q", tc.detail, buffers.stderr.String())
+			}
+			if !bytes.Equal(readTargetBytes(t, target), []byte(e2eFixture)) {
+				t.Fatal("invalid palette changed target")
+			}
+		})
+	}
+}
