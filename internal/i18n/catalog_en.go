@@ -203,5 +203,14 @@ var catalogEN = map[string]string{
 	"tui.history_read_failed":     "failed to read file: %s",
 	"tui.history_restore_ok":      "backup restored",
 	"tui.history_confirm_restore": "restore backup %s? [y/N]",
-	"tui.no_tty":                  "TUI requires an interactive terminal (TTY)",
+	// Separate key for a dirty session: restore reloads the session from
+	// disk, unsaved candidate is lost for good — warn about it explicitly.
+	"tui.history_confirm_restore_dirty": "restore backup %s? Unsaved changes will be lost. [y/N]",
+	// Block devices screen hint: 'r' reloads the list (lsblk) without leaving
+	// the screen; after a load failure it retries.
+	"tui.blockdev_keys": "[r] Refresh [Esc] Back",
+	// Status hint on the loadErr screen: the add form is unavailable until the
+	// document is loaded — fix the file read first (F5).
+	"tui.form_need_document": "fix the file load first (F5)",
+	"tui.no_tty":             "TUI requires an interactive terminal (TTY)",
 }

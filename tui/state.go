@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"fstab-edit/internal/parser"
+	"fstab-edit/internal/validator"
 	"fstab-edit/pkg/models"
 )
 
@@ -54,4 +55,47 @@ func (s *sessionState) undo(document *models.Document) bool {
 // candidate — сериализованные байты текущего документа для transaction.
 func (s *sessionState) candidate(document *models.Document) []byte {
 	return document.Serialize()
+}
+
+// severityRank возвращает вес severity для сравнения «наихудшей»: error
+// (2) сильнее warning (1); info и отсутствие диагностики — 0. Info не
+// показывается в таблице (ТЗ §5.3 фиксирует подсветку только ошибок и
+// предупреждений), поэтому вес 0 совпадает с «нет диагностики».
+func severityRank(s models.Severity) int {
+	switch s {
+	case models.SeverityError:
+		return 2
+	case models.SeverityWarning:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// rebuildDiagnostics пересчитывает кэш severityByLine: наихудшая severity
+// диагностики валидатора по каждой физической строке документа. Валидатор
+// чист (Validate не мутирует document), повторный вызов детерминирован.
+// Вызывается на загрузке документа, после каждой успешной мутации (applyOp),
+// после undo, после reloadFromDisk (включая restore из истории — он идёт
+// через reloadFromDisk). Document nil (loadErr-экран) даёт пустую map, а не
+// nil: рендер таблицы читает кэш без nil-проверок. Info-диагностики не
+// кэшируются — подсветка цветом только для error/warning.
+// Примечание: валидатор проверяет только активные записи, поэтому
+// закомментированная запись маркеров "!"/"?" не получает — это осознанная
+// семантика (отключённая запись конфигурацию не ломает), а не баг.
+func (m *model) rebuildDiagnostics() {
+	m.severityByLine = make(map[int]models.Severity)
+	if m.document == nil {
+		return
+	}
+	for _, diagnostic := range validator.Validate(m.document).Diagnostics {
+		if severityRank(diagnostic.Severity) == 0 {
+			continue
+		}
+		// На одной строке может быть несколько диагностик: кэшируется
+		// наихудшая severity (error побеждает warning).
+		if severityRank(diagnostic.Severity) > severityRank(m.severityByLine[diagnostic.Line]) {
+			m.severityByLine[diagnostic.Line] = diagnostic.Severity
+		}
+	}
 }

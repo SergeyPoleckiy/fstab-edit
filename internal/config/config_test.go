@@ -221,6 +221,7 @@ func TestLoadInvalidValuesError(t *testing.T) {
 		{name: "log.level из YAML", yaml: "log:\n  level: trace\n"},
 		{name: "lang из env", yaml: "", environ: []string{"FSTAB_EDIT_LANG=de"}},
 		{name: "output из env", yaml: "", environ: []string{"FSTAB_EDIT_OUTPUT=xml"}},
+		{name: "tui.theme из YAML", yaml: "tui:\n  theme: neon\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -234,6 +235,55 @@ func TestLoadInvalidValuesError(t *testing.T) {
 				t.Fatalf("ожидалась ошибка валидации (%s)", tc.name)
 			}
 		})
+	}
+}
+
+// TestLoadValidTUIThemes проверяет, что все четыре допустимые темы TUI
+// (ТЗ §9.6: dark, light, high-contrast, monochrome) принимаются валидацией
+// ключа tui.theme и резолвятся в Settings.TUITheme.
+func TestLoadValidTUIThemes(t *testing.T) {
+	for _, theme := range []string{"dark", "light", "high-contrast", "monochrome"} {
+		t.Run(theme, func(t *testing.T) {
+			stubSystemConfig(t)
+			opts := LoadOptions{
+				ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  theme: "+theme+"\n"),
+				Environ:      nil,
+				EUID:         1000,
+				LookupUser:   testLookupUser(t.TempDir()),
+			}
+			s, _, err := Load(opts)
+			if err != nil {
+				t.Fatalf("тема %s должна приниматься: %v", theme, err)
+			}
+			if s.TUITheme != theme {
+				t.Fatalf("TUITheme: got %q, want %q", s.TUITheme, theme)
+			}
+		})
+	}
+}
+
+// TestLoadInvalidTUIThemeMessage проверяет, что недопустимое значение
+// tui.theme отклоняется ошибкой валидации с понятным сообщением, включающим
+// и отклонённое значение, и список допустимых имён.
+func TestLoadInvalidTUIThemeMessage(t *testing.T) {
+	stubSystemConfig(t)
+	_, _, err := Load(LoadOptions{
+		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  theme: neon\n"),
+		Environ:      nil,
+		EUID:         1000,
+		LookupUser:   testLookupUser(t.TempDir()),
+	})
+	if err == nil {
+		t.Fatal("ожидалась ошибка валидации tui.theme")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "neon") {
+		t.Fatalf("ошибка должна содержать отклонённое значение: %q", msg)
+	}
+	for _, want := range []string{"dark", "light", "high-contrast", "monochrome"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("ошибка должна перечислять допустимую тему %s: %q", want, msg)
+		}
 	}
 }
 

@@ -70,6 +70,7 @@ func TestViewBlockDevicesRenders(t *testing.T) {
 		"Блочные устройства", "PATH", "TYPE", "FSTYPE", "SIZE", "MOUNTPOINT", "LABEL", "UUID",
 		"/dev/sda", "/dev/sda1", "/dev/sda2", "/dev/sdb", "vfat", "ext4", "238.5G",
 		"BOOT", "AAAA-1111", "22222222-2222-2222-2222-222222222222", "/boot/efi",
+		"[r] Обновить", "[Esc] Назад",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("экран устройств не содержит %q: %q", want, view)
@@ -215,5 +216,71 @@ func TestUpdateTableBKeyLoadsAndReloads(t *testing.T) {
 	m = updated.(model)
 	if m.ScreenNow() != ScreenTable {
 		t.Fatalf("Esc на ошибочном экране не вернул на таблицу: %v", m.ScreenNow())
+	}
+}
+
+// TestUpdateBlockDevicesRKeyReloads проверяет клавишу 'r' на экране
+// устройств: список перечитывается через seam без выхода с экрана, счётчик
+// вызовов растёт, курсор сбрасывается (новый список может быть короче
+// старого). Отдельно — 'r' в состоянии ошибки загрузки повторяет попытку:
+// lsblk мог стать доступен, поэтому клавиша активна и там.
+func TestUpdateBlockDevicesRKeyReloads(t *testing.T) {
+	calls := 0
+	opts := testOptions(t, writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\n"))
+	opts.Deps.ListBlockDevices = func(context.Context, sysutil.CommandRunner) ([]sysutil.BlockDevice, error) {
+		calls++
+		return testBlockDevices(), nil
+	}
+	m := testModel(t, opts)
+	m.blockdev = loadBlockDevices(context.Background(), &m) // вызов 1
+	m.screen = ScreenBlockDevices
+	if calls != 1 {
+		t.Fatalf("после loadBlockDevices вызовов = %d, want 1", calls)
+	}
+
+	// Навигация: курсор сдвинут с нуля, чтобы сброс после перезагрузки был
+	// заметен.
+	m.blockdev.Cursor = 3
+	updated, _ := m.Update(keyRunes('r'))
+	m = updated.(model)
+	if calls != 2 {
+		t.Fatalf("'r' не перечитала устройства: вызовов seam = %d, want 2", calls)
+	}
+	if m.ScreenNow() != ScreenBlockDevices {
+		t.Fatalf("'r' не должна менять экран: %v", m.ScreenNow())
+	}
+	if m.blockdev.Cursor != 0 {
+		t.Fatalf("после перезагрузки курсор сброшен = %d, want 0", m.blockdev.Cursor)
+	}
+	if len(m.blockdev.Devices) != 4 {
+		t.Fatalf("устройства после 'r': получено %d, want 4", len(m.blockdev.Devices))
+	}
+
+	// Ошибка загрузки: 'r' повторяет попытку. Первый вызов — сбой, второй —
+	// успех с данными: Err очищается, список на экране появляется.
+	retry := 0
+	opts.Deps.ListBlockDevices = func(context.Context, sysutil.CommandRunner) ([]sysutil.BlockDevice, error) {
+		retry++
+		if retry == 1 {
+			return nil, errors.New("lsblk временно недоступен")
+		}
+		return []sysutil.BlockDevice{{Name: "sdb", Path: "/dev/sdb", Type: "disk", Size: "931.5G"}}, nil
+	}
+	m = testModel(t, opts)
+	m.blockdev = loadBlockDevices(context.Background(), &m)
+	if m.blockdev.Err == nil {
+		t.Fatal("ожидалась ошибка первой загрузки")
+	}
+	m.screen = ScreenBlockDevices
+	updated, _ = m.Update(keyRunes('r'))
+	m = updated.(model)
+	if m.blockdev.Err != nil {
+		t.Fatalf("'r' после сбоя должна была повторить загрузку: Err = %v", m.blockdev.Err)
+	}
+	if retry != 2 {
+		t.Fatalf("вызовов seam = %d, want 2 (сбой + повтор)", retry)
+	}
+	if len(m.blockdev.Devices) != 1 || m.blockdev.Devices[0].Path != "/dev/sdb" {
+		t.Fatalf("устройства после повторной загрузки: %+v", m.blockdev.Devices)
 	}
 }

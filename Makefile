@@ -13,16 +13,34 @@ LDFLAGS := -X main.version=$(VERSION)
 # BINARY — имя собираемого бинарника.
 BINARY := fstab-edit
 
-.PHONY: build install test clean version pdf docs
+# PREFIX — базовый каталог установки; DESTDIR — staging-каталог (для пакетов).
+PREFIX ?= /usr/local
+DESTDIR ?=
+
+MANPAGE := docs/man/fstab-edit.1
+
+.PHONY: build install uninstall test clean version pdf docs
 
 # build собирает статический бинарь с версией из git.
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
-# install собирает и устанавливает бинарь в /usr/local/bin.
+# install собирает и устанавливает бинарь и man-страницу (с gzip, как
+# принято в дистрибутивах) в $(DESTDIR)$(PREFIX). gzip идёт во временный
+# файл (mktemp), чтобы обрыв не оставлял мусорный fstab-edit.1.gz в корне
+# дерева и install не ставил пустую страницу.
 install: build
-	sudo cp $(BINARY) /usr/local/bin/$(BINARY)
-	sudo chmod 755 /usr/local/bin/$(BINARY)
+	install -Dm755 $(BINARY) $(DESTDIR)$(PREFIX)/bin/$(BINARY)
+	test -f $(MANPAGE)
+	gztmp=$$(mktemp -t fstab-edit-man.XXXXXX.gz); \
+	gzip -9c $(MANPAGE) > $$gztmp && \
+	install -Dm644 $$gztmp $(DESTDIR)$(PREFIX)/share/man/man1/fstab-edit.1.gz; \
+	status=$$?; rm -f $$gztmp; exit $$status
+
+# uninstall удаляет установленные файлы (обратная операция install).
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/$(BINARY)
+	rm -f $(DESTDIR)$(PREFIX)/share/man/man1/fstab-edit.1.gz
 
 # test прогоняет весь набор тестов проекта.
 test:

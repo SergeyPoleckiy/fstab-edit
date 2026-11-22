@@ -8,7 +8,7 @@
 
 ## Статус
 
-- Текущие этапы: **1 — ядро и CLI**, **2 — TUI** и **3 — устройства/автодополнение/документация**. CLI реализован и собирается в статический бинарь `fstab-edit`; TUI (пакет `tui/`, команда `tui`) реализован: таблица записей, формы добавления/редактирования, undo, транзакционное сохранение с rollback-результатом, экраны diff/монтирований/блочных устройств/журнала/истории/помощи, автодополнение в форме, темы dark/monochrome. Полное руководство пользователя — [docs/user-guide.md](docs/user-guide.md) (PDF собирается целью `make pdf`).
+- Реализованы этапы **1–4**: **1 — ядро и CLI** (парсер, модель, редактор, валидатор, транзакция с rollback, backup, конфиг/журнал/i18n, 10 команд); **2 — TUI** (таблица, формы, undo, транзакционное сохранение, экраны diff/монтирований/устройств/журнала/истории/помощи); **3 — устройства и документация** (lsblk/blkid, автодополнение UUID/LABEL/типов ФС/опций, руководство пользователя с `make pdf`); **4 — полировка** (подсветка синтаксиса и severity, темы light/high-contrast, техдолг TUI, man-страница и `make install`). CLI собирается в статический бинарь `fstab-edit`; TUI (пакет `tui/`, команда `tui`) реализован: таблица записей, формы добавления/редактирования, undo, транзакционное сохранение с rollback-результатом, экраны diff/монтирований/блочных устройств/журнала/истории/помощи, автодополнение в форме, четыре встроенные темы. Полное руководство пользователя — [docs/user-guide.md](docs/user-guide.md) (PDF собирается целью `make pdf`).
 - Реализованы модель данных, lossless parser, selectors и in-memory mutations: Add, Edit, Delete, Comment и Uncomment, включая связанные comment blocks.
 - Реализованы публичная модель diagnostics и внутренний read-only validator: проверки полей, source/mount/FS type, опций, duplicates и специальные предупреждения работают детерминированно с документом в памяти.
 - Реализован secure runner: исполняемые файлы разрешаются только в фиксированных системных каталогах, аргументы передаются без shell, локаль фиксируется как `LC_ALL=C`. По умолчанию действуют timeout **10 секунд** и ограничение **64 KiB на каждый поток** stdout/stderr.
@@ -30,21 +30,19 @@
 git clone https://github.com/SergeyPoleckiy/fstab-edit.git
 cd fstab-edit
 make            # собирает ./fstab-edit
-make install    # сборка + установка в /usr/local/bin
+make install    # сборка + установка в /usr/local (нужен root)
 ```
 
-Установка — копирование статического бинаря в каталог из `PATH`:
+Установка `sudo make install` копирует статический бинарь в `/usr/local/bin`
+и man-страницу `fstab-edit(1)` в `/usr/local/share/man/man1` (в архиве gzip);
+после установки справка доступна через `man fstab-edit`. Базовый каталог
+меняется переменной `PREFIX`, staging-каталог для сборки пакетов —
+`DESTDIR` (например, `make install DESTDIR=/tmp/stage PREFIX=/usr`).
+
+Удаление — обратная операция, удаляет те же файлы:
 
 ```bash
-sudo cp fstab-edit /usr/local/bin/
-sudo chmod 755 /usr/local/bin/fstab-edit
-fstab-edit --version
-```
-
-Удаление — удаление бинаря (программа не устанавливает service-файлов и не меняет систему):
-
-```bash
-sudo rm /usr/local/bin/fstab-edit
+sudo make uninstall
 ```
 
 После установки опционально можно создать конфиг `/etc/fstab-edit/config.yaml` (см. раздел «Конфигурация» ниже). Файл журнала `/var/log/fstab-edit.log` создаётся автоматически при первой мутирующей операции; если журнал недоступен, мутация блокируется (exit code 3 или 6).
@@ -111,9 +109,9 @@ go build -o fstab-edit .
 
 Форма записи (Ins/Enter) поддерживает автодополнение (ТЗ §5.3): панель подсказок фильтруется по префиксу для полей «Тип ФС» и «Опции», а поле «Устройство» показывает все устройства без фильтрации; `Ctrl+N`/`Ctrl+P` листают варианты и подставляют выбранный в поле. Для устройств подставляемое значение выбирается по приоритету `UUID=` → `LABEL=` → `/dev/...` (устойчиво к переименованию дисков), список берётся из `lsblk`; при недоступности `lsblk` форма работает без подсказок устройств. Набор опций зависит от типа ФС (бессмысленные сочетания, например `discard` для сетевых ФС, исключаются).
 
-Тема оформления — `tui.theme` в конфигурации: `dark` (по умолчанию) или `monochrome`; ошибки и предупреждения помечаются текстовыми маркерами (`!`, `?`) во всех темах. Язык интерфейса — общий резолв `--lang`/`FSTAB_EDIT_LANG`/локаль.
+Тема оформления — `tui.theme` в конфигурации: `dark` (по умолчанию), `light`, `high-contrast` (усиленная контрастность для плохого зрения/проектора) или `monochrome`; неизвестное значение отклоняется ошибкой конфигурации (exit code 2). Ошибки и предупреждения помечаются текстовыми маркерами (`!`, `?`) во всех темах. Язык интерфейса — общий резолв `--lang`/`FSTAB_EDIT_LANG`/локаль.
 
-Ограничения: мышь не поддерживается (только клавиатура); расширенные экраны этапа 4 ТЗ — будущая работа. Документация пользователя: [docs/user-guide.md](docs/user-guide.md); PDF-версия собирается командой `make pdf` (pandoc + xelatex).
+Ограничения: мышь не поддерживается (только клавиатура). Отложено на будущее: кастомные палитры (переопределение отдельных цветов темы через YAML), английская версия руководства пользователя, описания назначения опций в подсказках формы, пакеты .deb/.rpm/.pkg.tar.zst. Документация пользователя: [docs/user-guide.md](docs/user-guide.md); PDF-версия собирается командой `make pdf` (pandoc + xelatex).
 
 ## Конфигурация
 
@@ -122,7 +120,7 @@ go build -o fstab-edit .
 - Пути автоматической загрузки: system — `/etc/fstab-edit/config.yaml` (требует root-ownership), user — `~/.config/fstab-edit/config.yaml`. Root-процесс (euid 0) user-config автоматически не загружает (ТЗ §13.2).
 - `--config <path>` задаёт явный YAML вместо system/user; env всё равно выше его.
 - Env-переменные: `FSTAB_EDIT_FILE`, `FSTAB_EDIT_BACKUP_DIR`, `FSTAB_EDIT_LOG_LEVEL`, `FSTAB_EDIT_LANG`, `FSTAB_EDIT_OUTPUT`. Неизвестные `FSTAB_EDIT_*` печатают `warning: ...` в stderr и игнорируются.
-- YAML-схема (ТЗ §13.3): `fstab_path`, `backup.dir|prefix|keep`, `log.file|level|max_size_mb|keep`, `tui.theme`. Язык и формат вывода из YAML не читаются (только env/CLI). Ключ `tui.theme` задаёт оформление TUI (`dark` — по умолчанию, `monochrome`).
+- YAML-схема (ТЗ §13.3): `fstab_path`, `backup.dir|prefix|keep`, `log.file|level|max_size_mb|keep`, `tui.theme`. Язык и формат вывода из YAML не читаются (только env/CLI). Ключ `tui.theme` задаёт оформление TUI (`dark` — по умолчанию, `light`, `high-contrast`, `monochrome`).
 - Security-checks (ТЗ §13.2): symlink-конфигурация отклоняется, файл не должен быть group/others-writable (иначе exit code 3), system-config обязан принадлежать root, user/explicit — effective UID. Некорректный YAML или значения — exit code 2.
 
 ## Журналирование
@@ -169,7 +167,7 @@ fstab-edit rollback --restore=2026-11-18_15-30-45.123456789Z
 ## Структура проекта
 
 ```text
-work/
+fstab-edit/
 ├── cmd/                  # Команды Cobra: флаги, prompt, exit mapping
 ├── main.go               # Production wiring процессовых зависимостей
 ├── internal/
@@ -189,7 +187,10 @@ work/
 ├── pkg/
 │   └── models/           # Публичные модели данных
 ├── tui/                  # TUI-интерфейс
-├── docs/                 # Документация проекта
+├── docs/                 # Документация проекта (user-guide, man, DEVELOPMENT.md)
+├── examples/             # Примеры конфигурации (config-minimal.yaml, config-full.yaml)
+├── CHANGELOG.md          # История изменений (Keep a Changelog)
+├── Makefile              # build/install/uninstall/test/pdf/version
 ├── LICENSE.en            # Лицензия MIT, английский текст
 ├── LICENSE.ru            # Неофициальный перевод лицензии MIT
 └── README.md             # Этот файл
@@ -253,6 +254,13 @@ golangci-lint run
 6. `Open`/`List`/`Select` отклоняют symlink-подмену любого уровня, mode отличный от `0600`, corrupt schema, hash mismatch, неверные modes/enums/UTC, чужой `source_path` и чужой prefix. `List` возвращает verified копии текущего target в детерминированном newest-first порядке; `Select` различает not found (`ErrBackupNotFound`) и ambiguous collision ID (`ErrBackupAmbiguous`).
 7. `Rotate` удаляет только собственные verified пары (sidecar, затем data): чужие, повреждённые, symlink и непроверенные записи каталога не входят в candidates и никогда не удаляются; `os.RemoveAll` не вызывается. `keep <= 0` заменяется default 10, protected ID сохраняются даже в зоне удаления, `os.ErrNotExist` при удалении не считается сбоем, а ошибка удаления останавливает ротацию с partial `RotationResult` (`Failed`) и сохранённой первичной ошибкой через `errors.Is`. Ошибки rotation содержат пути, но не данные backup, и не влияют на target.
 8. Automatic rollback transaction использует backup текущей операции напрямую и не переопределяет выбор через повторный `Select`. Manual rollback подключён в `cmd/rollback.go`: выбор копии выполняется до safety backup через positional ID или `--restore` (по умолчанию — newest), подтверждение с diff обязательно (non-TTY требует `--yes`), а `--dry-run` показывает выбранную копию и diff без создания safety copy и без записи target.
+
+## Документация проекта
+
+- [CHANGELOG.md](CHANGELOG.md) — история изменений по релизам.
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — архитектура, сборка, стандарты кода и релизный процесс для разработчиков.
+- [examples/](examples/) — примеры конфигурации (`config-minimal.yaml`, `config-full.yaml`).
+- [docs/man/fstab-edit.1](docs/man/fstab-edit.1) — man-страница (после `make install` — `man fstab-edit`).
 
 ## Лицензия
 

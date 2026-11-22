@@ -125,7 +125,13 @@ func (m model) updateHistory(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.status = m.theme.MarkError(result.Err.Error())
 				}
 			} else {
-				m.status = m.theme.Info.Render(Tr(m.opts.Lang, "history_restore_ok"))
+				// reloadFromDisk внутри restoreSelected уже оставил в статусе
+				// load_error, если перечитывание сорвалось (сессия занулена) —
+				// «restore ok» пишем только при восстановленной сессии, иначе
+				// маскируем потерю сессии ложным успехом.
+				if m.loadErr == nil {
+					m.status = m.theme.Info.Render(Tr(m.opts.Lang, "history_restore_ok"))
+				}
 			}
 			m.screen = ScreenTable
 			return m, nil
@@ -197,8 +203,16 @@ func (m model) viewHistory() string {
 		}
 	}
 	if m.history.confirm {
+		// При dirty-сессии предупреждаем, что несохранённые изменения будут
+		// потеряны: restore заменяет target на диске, после чего сессия
+		// перечитывается через reloadFromDisk и несохранённый candidate
+		// безвозвратно отбрасывается.
+		key := "history_confirm_restore"
+		if m.session != nil && m.session.dirty {
+			key = "history_confirm_restore_dirty"
+		}
 		b.WriteString("\n" + m.theme.Warning.Render(
-			Trf(m.opts.Lang, "history_confirm_restore", m.history.Selected().ID)) + "\n")
+			Trf(m.opts.Lang, key, m.history.Selected().ID)) + "\n")
 	}
 	b.WriteString("\n" + m.theme.Muted.Render(Tr(m.opts.Lang, "keys_history")) + "\n")
 	return b.String()

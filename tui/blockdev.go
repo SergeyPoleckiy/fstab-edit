@@ -58,12 +58,18 @@ func (m model) blockdevContent() []string {
 // в границах списка; сдвиг окна прокрутки подтягивается за курсором, чтобы
 // выбранная строка оставалась видимой (окно условно в screenPageSize строк,
 // как у прочих read-only экранов). Esc возвращает на таблицу (глобальное
-// правило). Ошибка загрузки не блокирует выход: экран остаётся только
-// просмотровым, клавиши навигации игнорируются.
+// правило), 'r' перечитывает список устройств без выхода с экрана (lsblk
+// мог отдать ошибку временно или список мог измениться — подключён новый
+// диск). Ошибка загрузки не блокирует выход: экран остаётся только
+// просмотровым, клавиши навигации игнорируются; 'r' в состоянии ошибки
+// повторяет попытку загрузки.
 func (m model) updateBlockDevices(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.blockdev.Err != nil {
-		if msg.String() == "esc" {
+		switch msg.String() {
+		case "esc":
 			m.screen = ScreenTable
+		case "r":
+			m.blockdev = loadBlockDevices(context.Background(), &m)
 		}
 		return m, nil
 	}
@@ -71,6 +77,14 @@ func (m model) updateBlockDevices(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.screen = ScreenTable
+		return m, nil
+	case "r":
+		// Перечитывание списка: данные могли измениться (подключён/отключён
+		// диск). Модель заменяется целиком: курсор сбрасывается, потому что
+		// новый список может быть короче старого и прежняя позиция теряет
+		// смысл. В состоянии ошибки загрузки (ветка выше) 'r' повторяет
+		// попытку — lsblk мог стать доступен.
+		m.blockdev = loadBlockDevices(context.Background(), &m)
 		return m, nil
 	case "up", "k":
 		if m.blockdev.Cursor > 0 {
@@ -121,6 +135,6 @@ func (m model) viewBlockDevices() string {
 			b.WriteString(row + "\n")
 		}
 	}
-	b.WriteString("\n" + m.theme.Muted.Render(Tr(m.opts.Lang, "keys_back")) + "\n")
+	b.WriteString("\n" + m.theme.Muted.Render(Tr(m.opts.Lang, "blockdev_keys")) + "\n")
 	return b.String()
 }
