@@ -13,9 +13,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      # fetch-depth: 0 — полная история с тегами: Makefile берёт версию из
-      # git describe. Ветки без тегов дают версию "dev" — для CI это допустимо,
-      # но полный checkout корректнее.
+      # fetch-depth: 0 — полная история с тегами: релизный workflow собирает
+      # версию из git describe, а полный checkout корректен и для CI-веток.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -28,7 +27,7 @@ jobs:
       # Линтер; локального .golangci.yml нет — используются defaults.
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v1.64.8
           args: --timeout 5m
 
       # Тесты с race-detector и профилем покрытия; -count=1 отключает кэш.
