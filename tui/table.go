@@ -60,6 +60,7 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// форму не ломает — панель просто не показывается.
 		if idxs := m.entryIndexes(); m.cursor < len(idxs) {
 			m.form = newEditForm(m.document, idxs[m.cursor])
+			m.form.lang = m.opts.Lang
 			m.form.devices, m.form.devicesErr = loadFormDevices(context.Background(), &m)
 			m.form.refreshHints()
 			m.screen = ScreenForm
@@ -75,6 +76,7 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			break
 		}
 		m.form = newAddForm()
+		m.form.lang = m.opts.Lang
 		m.form.devices, m.form.devicesErr = loadFormDevices(context.Background(), &m)
 		m.form.refreshHints()
 		m.screen = ScreenForm

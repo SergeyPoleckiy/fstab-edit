@@ -1,6 +1,7 @@
 // Файл complete.go содержит чистую логику автодополнения формы записи
-// (ТЗ §5.3): подсказки устройства из списка lsblk (с приоритетом UUID= /
-// LABEL= / путь), фильтрацию вариантов по префиксу и контекстно-зависимый
+// (ТЗ §5.3, ТЗ v2 этап 3): подсказки устройства из списка lsblk (с приоритетом
+// UUID= / PARTUUID= / LABEL= / PARTLABEL= / путь и пометкой повторяющихся
+// идентификаторов), фильтрацию вариантов по префиксу и контекстно-зависимый
 // набор опций монтирования (базовый перечень плюс добавки по типу ФС и
 // исключения бессмысленных опций, например discard для сетевых ФС).
 // Функции не зависят от bubbletea и unit-тестируются напрямую.
@@ -21,34 +22,67 @@ const maxDeviceHintInfoLen = 50
 // пустой: значение само говорящее. Тип назван deviceHint по контракту плана
 // этапа 3, но используется для подсказок всех полей формы.
 type deviceHint struct {
-	Value string // подставляемое значение: UUID=<uuid> | LABEL=<label> | /dev/... | тип ФС | опция
-	Info  string // правая колонка: TYPE FSTYPE SIZE [MOUNTPOINT] [LABEL=...] (только для устройств)
+	Value string // подставляемое значение: UUID=/PARTUUID=/LABEL=/PARTLABEL= | /dev/... | тип ФС | опция
+	Info  string // правая колонка: TYPE FSTYPE SIZE [MOUNTPOINT] [LABEL=...] [(не уникальный идентификатор)]
 }
 
 // deviceHints собирает подсказки устройства для поля device по плоскому списку
 // lsblk (дерево разворачивает sysutil.Flatten до вызова). Порядок подсказок —
-// порядок устройств в списке, чтобы панель совпадала с экраном B.
-func deviceHints(devices []sysutil.BlockDevice) []deviceHint {
+// порядок устройств в списке, чтобы панель совпадала с экраном B. lang нужен
+// для локализованной пометки повторяющегося идентификатора: она добавляется
+// в Info, когда выбранное для устройства значение (Value) встречается более
+// чем у одного устройства списка — подстановка остаётся, но пользователь
+// видит, что идентификатор не уникален (ТЗ v2 этап 3).
+func deviceHints(lang string, devices []sysutil.BlockDevice) []deviceHint {
+	// Первый проход — выбор Value и подсчёт частот каждого значения:
+	// дубликат определяется по подставляемой строке целиком, независимо от
+	// того, какой именно идентификатор в ней выбран (UUID, PARTUUID, ...).
+	values := make([]string, len(devices))
+	counts := make(map[string]int, len(devices))
+	for i, device := range devices {
+		values[i] = deviceHintValue(device)
+		counts[values[i]]++
+	}
+	marker := Tr(lang, "hint_duplicate")
 	hints := make([]deviceHint, 0, len(devices))
-	for _, device := range devices {
-		hints = append(hints, deviceHint{
-			Value: deviceHintValue(device),
-			Info:  deviceHintInfo(device),
-		})
+	for i, device := range devices {
+		hint := deviceHint{Value: values[i], Info: deviceHintInfo(device)}
+		// Помечается только выбранный идентификатор, а не путь: совпадение
+		// путей в одном списке lsblk невозможно, а совпадение UUID/PARTUUID
+		// встречается после клонирования дисков и означает реальную
+		// неоднозначность. Путь устройства не может совпасть с чужим
+		// идентификатором (всегда есть префикс "UUID=" и т.п.), поэтому
+		// сравнение с device.Path надёжно отличает fallback-путь.
+		if values[i] != device.Path && counts[values[i]] > 1 {
+			if hint.Info != "" {
+				hint.Info += " "
+			}
+			// Маркер дописывается поверх лимита maxDeviceHintInfoLen: это
+			// предупреждение о неоднозначности, его видимость важнее
+			// компактности колонки.
+			hint.Info += marker
+		}
+		hints = append(hints, hint)
 	}
 	return hints
 }
 
-// deviceHintValue выбирает подставляемое значение по приоритету ТЗ п.10:
-// UUID=<uuid> — устойчиво к переименованию устройств, далее LABEL=<label>,
-// и только при отсутствии обоих — путь /dev/.... Устройство без ФС и без
-// UUID/LABEL (например, чистый диск) подставляется путём.
+// deviceHintValue выбирает подставляемое значение по приоритету ТЗ v2 этап 3:
+// UUID=<uuid> — устойчиво к переименованию устройств; далее PARTUUID=<partuuid>
+// — UUID раздела GPT, не зависит от ФС и существует даже до создания ФС;
+// затем LABEL=<метка> и PARTLABEL=<метка раздела>; только при отсутствии всех
+// четырёх — путь /dev/.... Устройство без ФС и без единого идентификатора
+// (например, чистый диск) подставляется путём.
 func deviceHintValue(device sysutil.BlockDevice) string {
 	switch {
 	case device.UUID != "":
 		return "UUID=" + device.UUID
+	case device.PartUUID != "":
+		return "PARTUUID=" + device.PartUUID
 	case device.Label != "":
 		return "LABEL=" + device.Label
+	case device.PartLabel != "":
+		return "PARTLABEL=" + device.PartLabel
 	default:
 		return device.Path
 	}

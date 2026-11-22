@@ -15,7 +15,10 @@ import (
 
 // lsblkOutputColumns задаёт единственный поддерживаемый набор колонок lsblk.
 // Порядок колонок влияет на JSON-ключи, поэтому аргумент передаётся одной строкой.
-const lsblkOutputColumns = "NAME,PATH,TYPE,FSTYPE,SIZE,MOUNTPOINT,LABEL,UUID,MODEL"
+// PARTUUID/PARTLABEL добавлены на этапе 5 (ТЗ v2 этап 3): это идентификаторы
+// раздела GPT, которые lsblk показывает независимо от ФС, и они нужны форме
+// для автоподстановки и для пометки повторяющихся идентификаторов.
+const lsblkOutputColumns = "NAME,PATH,TYPE,FSTYPE,SIZE,MOUNTPOINT,LABEL,UUID,PARTUUID,PARTLABEL,MODEL"
 
 var (
 	// ErrNilRunner означает вызов парсера без CommandRunner: читать устройства
@@ -29,7 +32,9 @@ var (
 // Пустые поля (неприменимо или не заполнено) представляются пустой строкой;
 // null из JSON lsblk нормализуется в "". UUID/LABEL берутся из lsblk, без
 // отдельного вызова blkid; blkid применяется через ProbeDevice, когда lsblk
-// не показал нужных свойств устройства.
+// не показал нужных свойств устройства. PartUUID/PartLabel — идентификаторы
+// раздела из таблицы разделов (GPT/dos), не зависят от ФС и доступны, даже
+// когда UUID тома ещё не присвоен (ТЗ v2 этап 3).
 type BlockDevice struct {
 	Name       string        // sda1
 	Path       string        // /dev/sda1
@@ -38,7 +43,9 @@ type BlockDevice struct {
 	Size       string        // как выдал lsblk (17.4G) — без пересчёта
 	MountPoint string        // текущая точка монтирования или ""
 	Label      string        // метка тома или ""
-	UUID       string        // UUID или ""
+	UUID       string        // UUID тома или ""
+	PartUUID   string        // UUID раздела (PARTUUID) или ""
+	PartLabel  string        // метка раздела (PARTLABEL) или ""
 	Model      string        // модель диска или ""
 	Children   []BlockDevice // вложенные: partitions of disk, lv of vg
 }
@@ -50,6 +57,7 @@ type lsblkJSON struct {
 
 // lsblkDevice — внутреннее представление одного узла lsblk: все строковые
 // поля допускают null, поэтому разбираются через указатели и приводятся к "".
+// Ключи partuuid/partlabel соответствуют колонкам PARTUUID/PARTLABEL.
 type lsblkDevice struct {
 	Name       string        `json:"name"`
 	Path       *string       `json:"path"`
@@ -59,12 +67,14 @@ type lsblkDevice struct {
 	MountPoint *string       `json:"mountpoint"`
 	Label      *string       `json:"label"`
 	UUID       *string       `json:"uuid"`
+	PartUUID   *string       `json:"partuuid"`
+	PartLabel  *string       `json:"partlabel"`
 	Model      *string       `json:"model"`
 	Children   []lsblkDevice `json:"children"`
 }
 
 // ListBlockDevices возвращает дерево блочных устройств через
-// `lsblk --json --output NAME,PATH,TYPE,FSTYPE,SIZE,MOUNTPOINT,LABEL,UUID,MODEL`.
+// `lsblk --json --output NAME,PATH,TYPE,FSTYPE,SIZE,MOUNTPOINT,LABEL,UUID,PARTUUID,PARTLABEL,MODEL`.
 // Ненулевой exit code — ошибка с stderr; malformed JSON и обрезанный stdout —
 // ошибка, чтобы частичный список не выдавался за полный.
 func ListBlockDevices(ctx context.Context, runner CommandRunner) ([]BlockDevice, error) {
@@ -106,6 +116,8 @@ func (raw lsblkDevice) toBlockDevice() BlockDevice {
 		MountPoint: stringValue(raw.MountPoint),
 		Label:      stringValue(raw.Label),
 		UUID:       stringValue(raw.UUID),
+		PartUUID:   stringValue(raw.PartUUID),
+		PartLabel:  stringValue(raw.PartLabel),
 		Model:      stringValue(raw.Model),
 	}
 	if len(raw.Children) > 0 {
