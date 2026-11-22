@@ -26,12 +26,16 @@ build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
 # install собирает и устанавливает бинарь и man-страницу (с gzip, как
-# принято в дистрибутивах) в $(DESTDIR)$(PREFIX).
+# принято в дистрибутивах) в $(DESTDIR)$(PREFIX). gzip идёт во временный
+# файл (mktemp), чтобы обрыв не оставлял мусорный fstab-edit.1.gz в корне
+# дерева и install не ставил пустую страницу.
 install: build
 	install -Dm755 $(BINARY) $(DESTDIR)$(PREFIX)/bin/$(BINARY)
-	gzip -9c $(MANPAGE) > fstab-edit.1.gz
-	install -Dm644 fstab-edit.1.gz $(DESTDIR)$(PREFIX)/share/man/man1/fstab-edit.1.gz
-	rm -f fstab-edit.1.gz
+	test -f $(MANPAGE)
+	gztmp=$$(mktemp -t fstab-edit-man.XXXXXX.gz); \
+	gzip -9c $(MANPAGE) > $$gztmp && \
+	install -Dm644 $$gztmp $(DESTDIR)$(PREFIX)/share/man/man1/fstab-edit.1.gz; \
+	status=$$?; rm -f $$gztmp; exit $$status
 
 # uninstall удаляет установленные файлы (обратная операция install).
 uninstall:
