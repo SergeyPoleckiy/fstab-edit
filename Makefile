@@ -13,16 +13,30 @@ LDFLAGS := -X main.version=$(VERSION)
 # BINARY — имя собираемого бинарника.
 BINARY := fstab-edit
 
-.PHONY: build install test clean version pdf docs
+# PREFIX — базовый каталог установки; DESTDIR — staging-каталог (для пакетов).
+PREFIX ?= /usr/local
+DESTDIR ?=
+
+MANPAGE := docs/man/fstab-edit.1
+
+.PHONY: build install uninstall test clean version pdf docs
 
 # build собирает статический бинарь с версией из git.
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
-# install собирает и устанавливает бинарь в /usr/local/bin.
+# install собирает и устанавливает бинарь и man-страницу (с gzip, как
+# принято в дистрибутивах) в $(DESTDIR)$(PREFIX).
 install: build
-	sudo cp $(BINARY) /usr/local/bin/$(BINARY)
-	sudo chmod 755 /usr/local/bin/$(BINARY)
+	install -Dm755 $(BINARY) $(DESTDIR)$(PREFIX)/bin/$(BINARY)
+	gzip -9c $(MANPAGE) > fstab-edit.1.gz
+	install -Dm644 fstab-edit.1.gz $(DESTDIR)$(PREFIX)/share/man/man1/fstab-edit.1.gz
+	rm -f fstab-edit.1.gz
+
+# uninstall удаляет установленные файлы (обратная операция install).
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/$(BINARY)
+	rm -f $(DESTDIR)$(PREFIX)/share/man/man1/fstab-edit.1.gz
 
 # test прогоняет весь набор тестов проекта.
 test:

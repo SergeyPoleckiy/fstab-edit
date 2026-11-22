@@ -1,0 +1,325 @@
+.TH FSTAB-EDIT 1 "November 2026" "fstab-edit" "User Commands"
+.SH NAME
+fstab-edit \- safe editor for fstab(5) with validation, backup and rollback
+.SH SYNOPSIS
+.B fstab-edit
+.RI [ global-options ]
+.I command
+.RI [ command-options ]
+.br
+.B fstab-edit
+.RI [ global-options ]
+.RI [ args ]
+.SH DESCRIPTION
+.B fstab-edit
+is a command-line and interactive (TUI) editor for the static file system
+table
+.IR fstab (5).
+Every modifying operation runs in a transaction: the target file is locked,
+a backup copy is created, the change is written atomically, and the result
+is verified. If a post-write check fails, the target is rolled back
+automatically.
+.PP
+Running
+.B fstab-edit
+without arguments opens the interactive TUI editor (same as the
+.B tui
+command). Read-only commands
+.RB ( list ,
+.BR validate ,
+.BR verify-mount )
+do not create a log file; mutating commands and
+.B backup
+require the log file to be available before the target is touched.
+Machine-readable output formats print exactly one structured document to
+stdout; diagnostics, diffs and prompts go to stderr.
+.SH COMMANDS
+.TP
+.B list
+Show active and commented-out entries of the target file.
+.TP
+.B add
+Add a new entry. Requires
+.BR --device ,
+.BR --mount ,
+.BR --type
+and
+.BR --options ;
+.B --dump
+and
+.B --pass
+default to 0;
+.B --comment
+adds a comment block in front of the entry.
+.TP
+.BI edit " selector"
+Modify selected fields of an entry. Unspecified fields are left unchanged.
+Supports new
+.BR --device ,
+.BR --mount ,
+.BR --type ,
+.BR --options ,
+.BR --dump ,
+.BR --pass ,
+.BR --comment ,
+and the clearing flags
+.BR --clear-comment ,
+.BR --unset-dump ,
+.BR --unset-pass .
+.TP
+.BI delete " selector"
+Delete the selected entry.
+.TP
+.BI comment " selector"
+Comment out the selected active entry; its comment block is handled together
+with the entry.
+.TP
+.BI uncomment " selector"
+Uncomment the selected commented-out entry.
+.TP
+.B validate
+Validate the document with the built-in validator and, unless
+.B --offline
+is given, with an external static check
+.RB ( findmnt --verify )
+against a private copy of the target. Warnings are acceptable (exit 0);
+errors exit 1.
+.TP
+.B verify-mount
+Run only the static
+.B findmnt --verify
+check against the actual bytes of the target file.
+.B findmnt
+does not mount anything.
+.TP
+.B backup
+Create a manual backup copy of the target without modifying it.
+.B --dry-run
+performs no I/O at all and reports an empty backup ID.
+.TP
+.BI rollback " [backup-id]"
+Restore the target from a backup copy. The copy is selected by positional
+.B backup-id
+or
+.BI --restore=ID
+(default: newest). Before writing, a safety backup of the current target is
+created and a diff is shown for confirmation.
+.TP
+.B tui
+Open the interactive terminal UI (bubbletea) editor. Invoked automatically
+when
+.B fstab-edit
+runs without arguments.
+.SH GLOBAL OPTIONS
+.TP
+.BI --file " path"
+Path to the fstab file being edited (default:
+.IR /etc/fstab ).
+.TP
+.BI --config " path"
+Path to a YAML configuration file. When not given, configuration is looked
+up automatically (see
+.BR FILES ).
+.TP
+.BI --lang " ru|en"
+Language of messages. Default: resolved from the environment
+.RI ( --lang
+overrides
+.BR FSTAB_EDIT_LANG ,
+then
+.BR LC_ALL ,
+then
+.BR LANG ;
+fallback is
+.IR ru ).
+.TP
+.BI --output " table|json|csv|tsv"\fR,\fP -o
+Output format for list-style data (default:
+.IR table ).
+.TP
+.BI --log-level " debug|info|warn|error"
+Log level (default:
+.IR info ).
+.TP
+.BI --backup-dir " path"
+Directory for backup copies (default: directory of the target file).
+.TP
+.B --dry-run
+Show the diff without writing, locking or creating backups.
+.TP
+.BR --yes ", " -y
+Confirm an otherwise valid operation without prompting. Does not bypass
+validation errors, selector ambiguity or external check failures.
+.TP
+.BR --verbose ", " -v
+Additional diagnostics. Incompatible with
+.BR --quiet .
+.TP
+.BR --quiet ", " -q
+Suppress normal stdout; errors are still printed to stderr.
+.TP
+.B --offline
+Disable checks against external resources.
+.TP
+.B --version
+Print version and exit.
+.TP
+.BR --help ", " -h
+Print help for the root command or the given subcommand.
+.SH ENTRY SELECTORS
+The commands
+.BR edit ,
+.BR delete ,
+.BR comment
+and
+.B uncomment
+take a record selector: either a positional
+.I id
+or exactly one of the following flags. A numeric
+.I id
+is the physical line number of the entry; any other value is treated as a
+mount point. A source (device) is only selectable via
+.BR --device .
+.TP
+.BI --line " n"
+Physical line number of the entry (positive integer).
+.TP
+.BI --mount-point " path"
+Full decoded mount point value.
+.TP
+.BI --device " source"
+Full decoded source value of the entry.
+.PP
+No match exits 1; several matches exit 8 with a list of candidate lines; in
+an interactive terminal the tool offers to pick one of the candidates.
+.SH CONFIGURATION
+Settings are resolved in the order: CLI flags, then
+.B FSTAB_EDIT_*
+environment variables, then user YAML, then system YAML, then built-in
+defaults. The language and output format are not read from YAML (only from
+environment and CLI).
+.PP
+Recognized YAML keys:
+.TP
+.BI fstab_path
+Target file (default
+.IR /etc/fstab ).
+.TP
+.BI backup.dir
+Backup directory (default: directory of the target).
+.TP
+.BI backup.prefix
+Backup file name prefix (default:
+.IR fstab.bak ).
+.TP
+.BI backup.keep
+How many newest backups rotation keeps (default: 10).
+.TP
+.BI log.file
+Log file (default:
+.IR /var/log/fstab-edit.log ).
+.TP
+.BI log.level
+Log level:
+.IR debug ", " info ", " warn " or " error
+(default:
+.IR info ).
+.TP
+.BI log.max_size_mb
+Log rotation threshold in MiB (default: 10).
+.TP
+.BI log.keep
+How many rotated log archives to keep (default: 5).
+.TP
+.BI tui.theme
+TUI theme:
+.IR dark ", " light ", " high-contrast " or " monochrome
+(default:
+.IR dark ).
+.SH FILES
+.TP
+.B ~/.config/fstab-edit/config.yaml
+Per-user configuration. Not loaded automatically for a root (euid 0)
+process.
+.TP
+.B /etc/fstab-edit/config.yaml
+System-wide configuration; must be owned by root.
+.TP
+.B /var/log/fstab-edit.log
+Operation log, created automatically on the first mutating operation.
+.TP
+.IR backup-dir /fstab.bak. <backup-id>
+Backup copies of the target file. Each copy has a JSON sidecar file
+(with a
+.B .json
+suffix) holding metadata and a SHA-256 hash.
+.SH EXIT STATUS
+.TP
+.B 0
+Success (warnings are acceptable).
+.TP
+.B 1
+Validation errors: invalid input data, document or change; selector matched
+no entries.
+.TP
+.B 2
+Usage error: invalid arguments or flags, malformed configuration.
+.TP
+.B 3
+Insufficient permissions: unsafe configuration file, unavailable log file.
+.TP
+.B 4
+Access conflict: the target changed between load and write, or the lock is
+unavailable.
+.TP
+.B 5
+External check failure (e.g. findmnt(8) missing or failed).
+.TP
+.B 6
+I/O error: backup, write or rotation failure.
+.TP
+.B 7
+Critical rollback failure: the target was written but could not be restored.
+.TP
+.B 8
+Ambiguous selector: several entries match; candidate line numbers are listed.
+.SH EXAMPLES
+List entries of a test file in JSON format:
+.PP
+.RS
+.nf
+fstab-edit list --file ./fstab.test -o json | jq .
+.fi
+.RE
+.PP
+Preview adding an entry (diff only, nothing is written):
+.PP
+.RS
+.nf
+fstab-edit add --device UUID=3f5c8a12-9d4e-4b7a-8c1f-2a6d9e0b4f55 \e
+    --mount /mnt/data --type ext4 --options defaults,noatime \e
+    --dump 0 --pass 2 --comment "data disk" --dry-run
+.fi
+.RE
+.PP
+Create a backup and roll back to the newest copy, non-interactively:
+.PP
+.RS
+.nf
+sudo fstab-edit backup
+sudo fstab-edit rollback --yes
+.fi
+.RE
+.PP
+Open the interactive editor:
+.PP
+.RS
+.nf
+sudo fstab-edit tui
+.fi
+.RE
+.SH SEE ALSO
+.BR fstab (5),
+.BR mount (8),
+.BR findmnt (8),
+.BR lsblk (8)

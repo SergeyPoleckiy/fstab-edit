@@ -30,21 +30,19 @@
 git clone https://github.com/SergeyPoleckiy/fstab-edit.git
 cd fstab-edit
 make            # собирает ./fstab-edit
-make install    # сборка + установка в /usr/local/bin
+make install    # сборка + установка в /usr/local (нужен root)
 ```
 
-Установка — копирование статического бинаря в каталог из `PATH`:
+Установка `sudo make install` копирует статический бинарь в `/usr/local/bin`
+и man-страницу `fstab-edit(1)` в `/usr/local/share/man/man1` (в архиве gzip);
+после установки справка доступна через `man fstab-edit`. Базовый каталог
+меняется переменной `PREFIX`, staging-каталог для сборки пакетов —
+`DESTDIR` (например, `make install DESTDIR=/tmp/stage PREFIX=/usr`).
+
+Удаление — обратная операция, удаляет те же файлы:
 
 ```bash
-sudo cp fstab-edit /usr/local/bin/
-sudo chmod 755 /usr/local/bin/fstab-edit
-fstab-edit --version
-```
-
-Удаление — удаление бинаря (программа не устанавливает service-файлов и не меняет систему):
-
-```bash
-sudo rm /usr/local/bin/fstab-edit
+sudo make uninstall
 ```
 
 После установки опционально можно создать конфиг `/etc/fstab-edit/config.yaml` (см. раздел «Конфигурация» ниже). Файл журнала `/var/log/fstab-edit.log` создаётся автоматически при первой мутирующей операции; если журнал недоступен, мутация блокируется (exit code 3 или 6).
