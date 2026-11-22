@@ -25,6 +25,12 @@ func testLookupUser(home string) func(int) (string, string, error) {
 	}
 }
 
+// testEUID — effective UID текущего процесса. Файлы t.TempDir() всегда
+// принадлежат ему, поэтому загрузку в тестах вызываем с ним: хардкод
+// конкретного uid (1000) ломал прогон на любой машине, где uid пользователя
+// иной (GitHub Actions использует uid 1001 — отсюда и выбор os.Geteuid()).
+var testEUID = os.Geteuid()
+
 // writeConfig пишет YAML в tempdir и возвращает путь.
 func writeConfig(t *testing.T, dir, name, content string) string {
 	t.Helper()
@@ -71,7 +77,7 @@ func stubSystemConfig(t *testing.T) string {
 // config-файлах Load возвращает значения Default() без warning'ов.
 func TestLoadDefaults(t *testing.T) {
 	stubSystemConfig(t)
-	s, warnings, err := Load(LoadOptions{Environ: nil, EUID: 1000, LookupUser: testLookupUser(t.TempDir())})
+	s, warnings, err := Load(LoadOptions{Environ: nil, EUID: testEUID, LookupUser: testLookupUser(t.TempDir())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,13 +95,13 @@ func TestLoadDefaults(t *testing.T) {
 // env выше user/system, user выше system, system доезжает своими ключами.
 // Системная и пользовательская части разнесены по subtest'ам: system config
 // обязан принадлежать root (может создать только root-процесс), а user
-// config при Load(EUID=1000) обязан принадлежать uid 1000 (при root-прогоне
+// config при Load(testEUID) обязан принадлежать этому же uid (при root-прогоне
 // файлы в tempdir принадлежат uid 0) — одновременно обе части в одном
 // окружении воспроизвести невозможно.
 func TestLoadPriorityCLIEnvUserSystemDefaults(t *testing.T) {
 	t.Run("env-over-user", func(t *testing.T) {
 		if os.Geteuid() == 0 {
-			t.Skip("user config при Load(EUID=1000) должен принадлежать uid 1000; под root файлы tempdir принадлежат uid 0")
+			t.Skip("user config при Load(testEUID) должен принадлежать testEUID; под root файлы tempdir принадлежат uid 0")
 		}
 		stubSystemConfig(t)
 		home := t.TempDir()
@@ -103,7 +109,7 @@ func TestLoadPriorityCLIEnvUserSystemDefaults(t *testing.T) {
 
 		s, _, err := Load(LoadOptions{
 			Environ:    []string{"FSTAB_EDIT_FILE=/from-env"},
-			EUID:       1000,
+			EUID:       testEUID,
 			LookupUser: testLookupUser(home),
 		})
 		if err != nil {
@@ -127,7 +133,7 @@ func TestLoadPriorityCLIEnvUserSystemDefaults(t *testing.T) {
 
 		s, _, err := Load(LoadOptions{
 			Environ:    []string{"FSTAB_EDIT_FILE=/from-env"},
-			EUID:       1000,
+			EUID:       testEUID,
 			LookupUser: testLookupUser(t.TempDir()),
 		})
 		if err != nil {
@@ -150,7 +156,7 @@ func TestLoadPriorityCLIEnvUserSystemDefaults(t *testing.T) {
 // ключ explicit перекрывается env.
 func TestLoadExplicitPath(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("при root-прогоне tempdir-файлы принадлежат uid 0 и не проходят ownership при Load(EUID=1000)")
+		t.Skip("при root-прогоне tempdir-файлы принадлежат uid 0 и не проходят ownership при Load(testEUID)")
 	}
 	systemPath := stubSystemConfig(t)
 	// system config существует и валиден, но не должен быть прочитан.
@@ -165,7 +171,7 @@ func TestLoadExplicitPath(t *testing.T) {
 	s, _, err := Load(LoadOptions{
 		ExplicitPath: explicit,
 		Environ:      []string{"FSTAB_EDIT_FILE=/from-env"},
-		EUID:         1000,
+		EUID:         testEUID,
 		LookupUser:   testLookupUser(home),
 	})
 	if err != nil {
@@ -191,7 +197,7 @@ func TestLoadUnknownEnvWarns(t *testing.T) {
 	stubSystemConfig(t)
 	s, warnings, err := Load(LoadOptions{
 		Environ:    []string{"FSTAB_EDIT_FOO=bar"},
-		EUID:       1000,
+		EUID:       testEUID,
 		LookupUser: testLookupUser(t.TempDir()),
 	})
 	if err != nil {
@@ -216,7 +222,7 @@ func TestLoadUnknownYAMLKeyErrors(t *testing.T) {
 	_, _, err := Load(LoadOptions{
 		ExplicitPath: explicit,
 		Environ:      nil,
-		EUID:         1000,
+		EUID:         testEUID,
 		LookupUser:   testLookupUser(t.TempDir()),
 	})
 	if err == nil {
@@ -240,7 +246,7 @@ func TestLoadInvalidValuesError(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stubSystemConfig(t)
-			opts := LoadOptions{Environ: tc.environ, EUID: 1000, LookupUser: testLookupUser(t.TempDir())}
+			opts := LoadOptions{Environ: tc.environ, EUID: testEUID, LookupUser: testLookupUser(t.TempDir())}
 			if tc.yaml != "" {
 				opts.ExplicitPath = writeConfig(t, t.TempDir(), "explicit.yaml", tc.yaml)
 			}
@@ -262,7 +268,7 @@ func TestLoadValidTUIThemes(t *testing.T) {
 			opts := LoadOptions{
 				ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  theme: "+theme+"\n"),
 				Environ:      nil,
-				EUID:         1000,
+				EUID:         testEUID,
 				LookupUser:   testLookupUser(t.TempDir()),
 			}
 			s, _, err := Load(opts)
@@ -284,7 +290,7 @@ func TestLoadInvalidTUIThemeMessage(t *testing.T) {
 	_, _, err := Load(LoadOptions{
 		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  theme: neon\n"),
 		Environ:      nil,
-		EUID:         1000,
+		EUID:         testEUID,
 		LookupUser:   testLookupUser(t.TempDir()),
 	})
 	if err == nil {
@@ -314,7 +320,7 @@ func TestLoadRejectsSymlink(t *testing.T) {
 	_, _, err := Load(LoadOptions{
 		ExplicitPath: link,
 		Environ:      nil,
-		EUID:         1000,
+		EUID:         testEUID,
 		LookupUser:   testLookupUser(t.TempDir()),
 	})
 	if err == nil {
@@ -358,7 +364,7 @@ func TestLoadUserConfigOwnershipAndMode(t *testing.T) {
 		if err := os.Chmod(path, 0o660); err != nil {
 			t.Fatal(err)
 		}
-		_, _, err := Load(LoadOptions{Environ: nil, EUID: 1000, LookupUser: testLookupUser(home)})
+		_, _, err := Load(LoadOptions{Environ: nil, EUID: testEUID, LookupUser: testLookupUser(home)})
 		if err == nil {
 			t.Fatal("ожидалась ошибка на group-writable user config")
 		}
@@ -388,7 +394,7 @@ func TestLoadSystemConfigOwnership(t *testing.T) {
 		if err := os.Chmod(systemPath, 0o660); err != nil {
 			t.Fatal(err)
 		}
-		_, _, err := Load(LoadOptions{Environ: nil, EUID: 1000, LookupUser: testLookupUser(t.TempDir())})
+		_, _, err := Load(LoadOptions{Environ: nil, EUID: testEUID, LookupUser: testLookupUser(t.TempDir())})
 		if err == nil {
 			t.Fatal("ожидалась ошибка на group-writable system config")
 		}
@@ -402,7 +408,7 @@ func TestLoadSystemConfigOwnership(t *testing.T) {
 		}
 		systemPath := stubSystemConfig(t)
 		writeConfig(t, filepath.Dir(systemPath), "config.yaml", "log:\n  level: warn\n")
-		_, _, err := Load(LoadOptions{Environ: nil, EUID: 1000, LookupUser: testLookupUser(t.TempDir())})
+		_, _, err := Load(LoadOptions{Environ: nil, EUID: testEUID, LookupUser: testLookupUser(t.TempDir())})
 		if err == nil {
 			t.Fatal("ожидалась ошибка: system config не принадлежит root")
 		}
@@ -413,7 +419,7 @@ func TestLoadSystemConfigOwnership(t *testing.T) {
 // возвращённом LookupUser по effective UID, а не в непроверенном HOME.
 func TestLookupHomeByEffectiveUID(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("при root-прогоне tempdir-файлы принадлежат uid 0 и не проходят ownership при Load(EUID=1000)")
+		t.Skip("при root-прогоне tempdir-файлы принадлежат uid 0 и не проходят ownership при Load(testEUID)")
 	}
 	stubSystemConfig(t)
 	envHome := t.TempDir()
@@ -423,7 +429,7 @@ func TestLookupHomeByEffectiveUID(t *testing.T) {
 
 	s, _, err := Load(LoadOptions{
 		Environ:    []string{"HOME=" + envHome},
-		EUID:       1000,
+		EUID:       testEUID,
 		LookupUser: testLookupUser(passwdHome),
 	})
 	if err != nil {
@@ -462,7 +468,7 @@ tui:
 	s, _, err := Load(LoadOptions{
 		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", yaml),
 		Environ:      nil,
-		EUID:         1000,
+		EUID:         testEUID,
 		LookupUser:   testLookupUser(t.TempDir()),
 	})
 	if err != nil {
@@ -488,7 +494,7 @@ func TestLoadTUIColorsEmptyMapValid(t *testing.T) {
 	s, _, err := Load(LoadOptions{
 		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  colors: {}\n"),
 		Environ:      nil,
-		EUID:         1000,
+		EUID:         testEUID,
 		LookupUser:   testLookupUser(t.TempDir()),
 	})
 	if err != nil {
@@ -537,7 +543,7 @@ func TestLoadTUIColorsInvalid(t *testing.T) {
 			_, _, err := Load(LoadOptions{
 				ExplicitPath: explicitPath,
 				Environ:      nil,
-				EUID:         1000,
+				EUID:         testEUID,
 				LookupUser:   testLookupUser(t.TempDir()),
 			})
 			if err == nil {
@@ -579,7 +585,7 @@ tui:
 	s, _, err := Load(LoadOptions{
 		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", yaml),
 		Environ:      nil,
-		EUID:         1000,
+		EUID:         testEUID,
 		LookupUser:   testLookupUser(t.TempDir()),
 	})
 	if err != nil {
@@ -598,7 +604,7 @@ func TestLoadInvalidTUIColorsMessage(t *testing.T) {
 	_, _, err := Load(LoadOptions{
 		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  colors:\n    nonsense: red\n"),
 		Environ:      nil,
-		EUID:         1000,
+		EUID:         testEUID,
 		LookupUser:   testLookupUser(t.TempDir()),
 	})
 	if err == nil {
@@ -615,7 +621,7 @@ func TestLoadInvalidTUIColorsMessage(t *testing.T) {
 	_, _, err = Load(LoadOptions{
 		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  colors:\n    title: \"#0f0\"\n"),
 		Environ:      nil,
-		EUID:         1000,
+		EUID:         testEUID,
 		LookupUser:   testLookupUser(t.TempDir()),
 	})
 	if err == nil {
