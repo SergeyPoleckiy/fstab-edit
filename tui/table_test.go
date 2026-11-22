@@ -352,3 +352,77 @@ func TestInsertOnLoadErrDoesNotOpenForm(t *testing.T) {
 		t.Fatalf("loadErr-экран не рендерит статус-подсказку: %q", view)
 	}
 }
+
+// TestReloadErrorNullsStaleSession проверяет инвариант loadErr ⇒
+// document/session == nil: при ошибке перезагрузки (target стал нечитаемым)
+// reloadFromDisk зануляет stale-состояние, а не оставляет прежнюю сессию.
+// Иначе возможен обход guard'ов: 'i' открыла бы невидимую форму (View рендерит
+// loadErr-ветку), а мутации шли бы по устаревшему документу. Сценарий:
+// загрузка → мутация (dirty) → target удалён → F5 (подтверждение 'y') →
+// loadErr, сессия/документ занулены, все guard'ы таблицы не работают.
+func TestReloadErrorNullsStaleSession(t *testing.T) {
+	target := writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\nUUID=bbb /mnt/data ext4 rw 0 2\n")
+	m := testModel(t, testOptions(t, target))
+
+	// Мутация: удаление записи делает сессию dirty (guard'ы undo/dirty
+	// ниже проверяют именно это состояние до зануления).
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDelete})
+	m = updated.(model)
+	if !m.session.dirty {
+		t.Fatal("после удаления сессия должна быть dirty")
+	}
+
+	// Target больше не читается; F5 при dirty требует подтверждения.
+	if err := os.Remove(target); err != nil {
+		t.Fatalf("удалить target: %v", err)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyF5})
+	m = updated.(model)
+	if m.ScreenNow() != ScreenConfirmReload {
+		t.Fatalf("F5 при dirty должен открыть подтверждение: %v", m.ScreenNow())
+	}
+	updated, _ = m.Update(keyRunes('y'))
+	m = updated.(model)
+	if m.loadErr == nil {
+		t.Fatal("ожидалась ошибка перезагрузки (loadErr)")
+	}
+	if m.session != nil || m.document != nil {
+		t.Fatal("при loadErr document/session должны быть занулены (stale-состояние недопустимо)")
+	}
+	if len(m.severityByLine) != 0 {
+		t.Fatalf("кэш диагностик должен быть очищен вместе с документом, получено %v", m.severityByLine)
+	}
+	if m.ScreenNow() != ScreenTable {
+		t.Fatalf("после подтверждения перезагрузки экран = %v, want ScreenTable", m.ScreenNow())
+	}
+
+	// 'i' не открывает форму: показывается статус-подсказка form_need_document.
+	updated, _ = m.Update(keyRunes('i'))
+	m = updated.(model)
+	if m.ScreenNow() != ScreenTable {
+		t.Fatalf("'i' на loadErr-экране открыла экран %v, форма запрещена", m.ScreenNow())
+	}
+	if !strings.Contains(m.status, "исправьте загрузку файла (F5)") {
+		t.Fatalf("статус-подсказка не показана: %q", m.status)
+	}
+
+	// Guard'ы мутаций не работают над устаревшим документом: undo, удаление,
+	// комментарий и сохранение — no-op, экран остаётся таблицей.
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyCtrlZ},
+		{Type: tea.KeyDelete},
+		keyRunes('c'),
+		{Type: tea.KeyCtrlS},
+	} {
+		updated, _ = m.Update(key)
+		m = updated.(model)
+		if m.ScreenNow() != ScreenTable {
+			t.Fatalf("клавиша %q при loadErr сменила экран на %v, guard должен был отсечь",
+				key.String(), m.ScreenNow())
+		}
+	}
+	// View рендерит loadErr-ветку (не таблицу по stale-документу).
+	if view := m.View(); !strings.Contains(view, "не удалось прочитать") {
+		t.Fatalf("ожидался loadErr-рендер, получено: %q", view)
+	}
+}

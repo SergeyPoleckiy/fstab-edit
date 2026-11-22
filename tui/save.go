@@ -127,6 +127,24 @@ func (m *model) reloadFromDisk() error {
 	snapshot, err := deps.ReadSnapshot(m.opts.Target)
 	if err != nil {
 		m.loadErr = err
+		// Инвариант loadErr ⇒ document/session == nil: достоверных байт на
+		// диске нет, поэтому stale-копия в памяти недопустима — все guard'ы
+		// таблицы (мутации, форма, save, diff) опираются на session == nil
+		// как на признак loadErr-состояния. Без зануления возможен обход:
+		// чистая сессия → target стал нечитаемым → F5 → loadErr, но session
+		// прежний, и 'i' открыла бы невидимую форму (View рендерит
+		// loadErr-ветку), а мутации шли бы по устаревшему документу.
+		// Побочный случай — restore из истории: restoreSelected вызывает
+		// reloadFromDisk только после успешной замены target, поэтому сюда мы
+		// попадаем лишь если target стал нечитаемым уже ПОСЛЕ восстановления;
+		// на диске лежит верная копия, и следующий F5 (уже без подтверждения —
+		// сессия nil) всё восстановит.
+		m.document = nil
+		m.session = nil
+		m.cursor = 0
+		// Кэш диагностик очищается вместе с документом: stale-маркеры не должны
+		// переживать зануление. Успешная перезагрузка пересчитает кэш заново.
+		m.rebuildDiagnostics()
 		m.status = m.theme.MarkError(Trf(m.opts.Lang, "load_error", m.opts.Target, err.Error()))
 		return err
 	}

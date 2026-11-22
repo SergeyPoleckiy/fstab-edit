@@ -69,7 +69,9 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// сессия nil, поэтому save всё равно отказал бы. Вместо формы показываем
 		// статус-подсказку: сначала нужно восстановить загрузку (F5).
 		if m.session == nil {
-			m.status = m.theme.Muted.Render(Tr(m.opts.Lang, "form_need_document"))
+			// Статус хранится plain-текстом: стилизация — прерогатива View
+			// (Info.Render в viewTable и на loadErr-экране).
+			m.status = Tr(m.opts.Lang, "form_need_document")
 			break
 		}
 		m.form = newAddForm()

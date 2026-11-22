@@ -289,7 +289,7 @@ func TestCommentToggleFlow(t *testing.T) {
 func TestCtrlCReturnsFromSubscreens(t *testing.T) {
 	subscreens := []Screen{
 		ScreenDiff, ScreenMounts, ScreenLog, ScreenHelp,
-		ScreenBlockDevices, ScreenHistory, ScreenSaveResult,
+		ScreenBlockDevices, ScreenHistory, ScreenSaveResult, ScreenConflict,
 	}
 	for _, s := range subscreens {
 		m := testModel(t, testOptions(t, writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\n")))
