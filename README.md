@@ -187,8 +187,9 @@ fstab-edit/
 ├── pkg/
 │   └── models/           # Публичные модели данных
 ├── tui/                  # TUI-интерфейс
-├── docs/                 # Документация проекта (user-guide, man, DEVELOPMENT.md)
+├── docs/                 # Документация: user-guide.md, DEVELOPMENT.md, spec/ (ТЗ), man/
 ├── examples/             # Примеры конфигурации (config-minimal.yaml, config-full.yaml)
+├── AGENTS.md             # Правила проекта для AI-агентов (архитектура, workflow)
 ├── CHANGELOG.md          # История изменений (Keep a Changelog)
 ├── Makefile              # build/install/uninstall/test/pdf/version
 ├── LICENSE.en            # Лицензия MIT, английский текст
