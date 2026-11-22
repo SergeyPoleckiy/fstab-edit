@@ -1,0 +1,39 @@
+# Релиз по тегу v*: статическая сборка (версия = тег через git describe),
+# контрольные суммы и GitHub Release с бинарём и SHA256SUMS.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # fetch-depth: 0 — checkout конкретного тега с полной историей:
+      # Makefile берёт версию из git describe, для тега vX.Y версия бинаря
+      # будет ровно "vX.Y".
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Сборка статического бинаря с версией из тега.
+      - name: Сборка статического бинаря
+        run: make build
+
+      # Контрольные суммы артефактов релиза.
+      - name: Формирование SHA256SUMS
+        run: sha256sum fstab-edit > SHA256SUMS
+
+      # gh CLI предустановлен в ubuntu-latest runner'ах; GITHUB_TOKEN
+      # выдаётся автоматически при permissions.contents: write.
+      - name: Создание GitHub Release
+        run: gh release create "${{ github.ref_name }}" fstab-edit SHA256SUMS --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

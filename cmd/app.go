@@ -489,6 +489,34 @@ func (a *App) resolveSettings(cmd *cobra.Command) *cliapp.ExitError {
 		LookupUser:   config.LookupUserByUID,
 	})
 	if err != nil {
+		// Отказ валидации пользовательской палитры tui.colors: сообщение
+		// собирается детальным i18n-ключом по причине отказа (неизвестная
+		// роль / невалидный цвет), а не общим config.invalid — так диагностика
+		// полностью локализуется и сразу называет отклонённую пару.
+		// Cause не заполняется: иначе printExitError продублировал бы русский
+		// fallback Message после локализованного текста.
+		var colorErr *config.TUIColorError
+		if errors.As(err, &colorErr) {
+			// Путь файла-источника из Load (при автозагрузке --config пуст,
+			// а реальный путь знает только config.Load); флаг — запасной
+			// вариант для гипотетических прямых вызовов валидации.
+			path := colorErr.Path
+			if path == "" {
+				path = a.flags.config
+			}
+			key := "config.bad_tui_color_role"
+			args := []any{colorErr.Role, path, config.TUIColorRoleList()}
+			if colorErr.Reason == config.TUIColorInvalidColor {
+				key = "config.bad_tui_color_value"
+				args = []any{colorErr.Value, colorErr.Role, path}
+			}
+			return &cliapp.ExitError{
+				Code:        cliapp.ExitUsage,
+				Message:     colorErr.Error(),
+				MessageKey:  key,
+				MessageArgs: args,
+			}
+		}
 		var loadErr *config.LoadError
 		code := cliapp.ExitUsage
 		key := "config.invalid"

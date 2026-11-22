@@ -1,0 +1,55 @@
+# CI: линт → форматирование gofmt → тесты с race-detector → порог покрытия
+# ≥80% → статическая сборка. Триггеры — push и pull_request в ветки main и dev. Тесты работают на
+# tempdir/fake-seams и не трогают реальный /etc/fstab — root не требуется.
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 — полная история с тегами: релизный workflow собирает
+      # версию из git describe, а полный checkout корректен и для CI-веток.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Версия Go берётся из go.mod (toolchain проекта).
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Линтер; локального .golangci.yml нет — используются defaults.
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+          args: --timeout 5m
+
+      # Форматирование: gofmt -l печатает файлы с отклонениями — непустой
+      # вывод означает регрессию и роняет шаг (golangci-lint v1 по умолчанию
+      # gofmt не включает, поэтому проверка отдельной ступенью).
+      - name: Проверка форматирования gofmt
+        run: test -z "$(gofmt -l .)"
+
+      # Тесты с race-detector и профилем покрытия; -count=1 отключает кэш.
+      - name: Тесты с race-detectorом и профилем покрытия
+        run: go test -race -count=1 -coverprofile=cover.out ./...
+
+      # Порог суммарного покрытия ≥80%: awk завершается ненулевым кодом
+      # при недоборе — шаг и весь workflow падают.
+      - name: Проверка порога покрытия 80%
+        run: |
+          total=$(go tool cover -func=cover.out | awk '/^total:/{print $3+0}')
+          echo "coverage: $total%"
+          awk -v t="$total" 'BEGIN{exit !(t>=80)}'
+
+      # Статическая сборка (без CGO) и smoke-проверка версии.
+      - name: Сборка статического бинаря
+        run: CGO_ENABLED=0 go build -o fstab-edit .
+      - name: "Smoke: проверка версии бинаря"
+        run: ./fstab-edit --version

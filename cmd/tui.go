@@ -35,9 +35,10 @@ func (a *App) launchTUI() error {
 		return cliapp.UsageError(nil, i18n.Tf(a.lang, "tui.no_tty"))
 	}
 	opts := tui.Options{
-		Target: a.flags.file,
-		Lang:   a.lang,
-		Theme:  a.settings.TUITheme,
+		Target:         a.flags.file,
+		Lang:           a.lang,
+		Theme:          a.settings.TUITheme,
+		ThemeOverrides: a.settings.TUIColors, // nil без tui.colors: палитра темы без изменений
 		Backup: tui.BackupSettings{
 			Dir:    a.settings.BackupDir,
 			Prefix: a.settings.BackupPrefix,

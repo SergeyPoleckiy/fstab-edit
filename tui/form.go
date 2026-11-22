@@ -37,6 +37,12 @@ type formModel struct {
 	focus   int    // 0..6; 0-5 поля, 6 комментарий
 	preview string // кэш предпросмотра raw-строки
 	errText string // текстовая ошибка поля (не только цвет!)
+	// lang — язык интерфейса для локализованных фрагментов подсказок
+	// (пометка повторяющегося идентификатора устройства). Заполняется
+	// открывающей форму моделью (table.go); в тестах, собирающих форму
+	// напрямую через newAddForm, остаётся пустым — каталог тогда отдаёт
+	// английский fallback, на остальные подсказки lang не влияет.
+	lang string
 	// hints — варианты подстановки для активного поля (автодополнение, ТЗ §5.3):
 	// заполняются только для полей device (0), типа ФС (2) и опций (3);
 	// hintIdx — выбранный индекс (-1 — ничего не выбрано, панель без курсора).
@@ -315,7 +321,7 @@ func (f *formModel) refreshHints() {
 	switch f.focus {
 	case 0:
 		if len(f.devices) > 0 {
-			f.hints = deviceHints(f.devices)
+			f.hints = deviceHints(f.lang, f.devices)
 		}
 	case 2:
 		// Тип ФС фильтруется введённым префиксом по единому перечню валидатора.
@@ -547,7 +553,9 @@ func (m model) formHintsView() string {
 	for i := start; i < min(len(m.form.hints), start+maxFormHints); i++ {
 		hint := m.form.hints[i]
 		// Значение усечено до 32 символов, чтобы правая колонка Info не уплывала
-		// на узких терминалах; Info уже ограничена maxDeviceHintInfoLen.
+		// на узких терминалах. Info ограничена maxDeviceHintInfoLen на этапе
+		// сборки, но маркер неуникального идентификатора намеренно дописывается
+		// поверх этого лимита, поэтому здесь Info печатается без дополнительной обрезки.
 		line := fmt.Sprintf("%-32.32s %s", hint.Value, hint.Info)
 		if i == m.form.hintIdx {
 			line = m.theme.Selected.Render(line)

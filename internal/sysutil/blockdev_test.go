@@ -36,8 +36,9 @@ func blockdevFixture(t *testing.T, name string) string {
 	return string(data)
 }
 
-// wantLsblkArgv — единственный поддерживаемый набор аргументов lsblk.
-var wantLsblkArgv = []string{"--json", "--output", "NAME,PATH,TYPE,FSTYPE,SIZE,MOUNTPOINT,LABEL,UUID,MODEL"}
+// wantLsblkArgv — единственный поддерживаемый набор аргументов lsblk:
+// колонки PARTUUID/PARTLABEL добавлены на этапе 5 (ТЗ v2 этап 3).
+var wantLsblkArgv = []string{"--json", "--output", "NAME,PATH,TYPE,FSTYPE,SIZE,MOUNTPOINT,LABEL,UUID,PARTUUID,PARTLABEL,MODEL"}
 
 // TestListBlockDevicesTree проверяет точный argv, разбор дерева (disk с
 // partitions, LVM-children) и нормализацию null-полей lsblk в пустые строки.
@@ -57,16 +58,18 @@ func TestListBlockDevicesTree(t *testing.T) {
 	if !reflect.DeepEqual(runner.args, wantLsblkArgv) {
 		t.Fatalf("argv: got %v, want %v", runner.args, wantLsblkArgv)
 	}
-	if len(devices) != 3 {
-		t.Fatalf("корневых устройств: got %d, want 3", len(devices))
+	if len(devices) != 6 {
+		t.Fatalf("корневых устройств: got %d, want 6", len(devices))
 	}
 
-	// Диск sda: null fstype/mountpoint/label/uuid превращаются в "".
+	// Диск sda: null fstype/mountpoint/label/uuid/partuuid/partlabel
+	// превращаются в "".
 	sda := devices[0]
 	if sda.Name != "sda" || sda.Path != "/dev/sda" || sda.Type != "disk" {
 		t.Fatalf("диск sda разобран неверно: %+v", sda)
 	}
-	if sda.FSType != "" || sda.MountPoint != "" || sda.Label != "" || sda.UUID != "" {
+	if sda.FSType != "" || sda.MountPoint != "" || sda.Label != "" || sda.UUID != "" ||
+		sda.PartUUID != "" || sda.PartLabel != "" {
 		t.Fatalf("null-поля должны стать пустыми строками: %+v", sda)
 	}
 	if sda.Model != "Samsung_SSD_870_EVO" || sda.Size != "931.5G" {
@@ -74,6 +77,13 @@ func TestListBlockDevicesTree(t *testing.T) {
 	}
 	if len(sda.Children) != 2 {
 		t.Fatalf("children диска: got %d, want 2", len(sda.Children))
+	}
+
+	// Раздел sda1 несёт оба идентификатора раздела: PARTUUID и PARTLABEL
+	// (ТЗ v2 этап 3) — проверяем разбор значений, а не только null-нормализацию.
+	sda1 := sda.Children[0]
+	if sda1.PartUUID != "efi-partuuid-7777" || sda1.PartLabel != "EFI_PART" {
+		t.Fatalf("partuuid/partlabel sda1 разобраны неверно: %+v", sda1)
 	}
 
 	// Раздел sda2 содержит LVM-children.
@@ -95,6 +105,25 @@ func TestListBlockDevicesTree(t *testing.T) {
 	}
 	if devices[2].Type != "loop" || devices[2].Label != "" || devices[2].MountPoint != "/snap/core" {
 		t.Fatalf("loop0 разобран неверно: %+v", devices[2])
+	}
+
+	// Идентификаторы разделов (ТЗ v2 этап 3): устройство со всеми четырьмя
+	// идентификаторами, устройство только с PARTUUID и устройство только
+	// с PARTLABEL; прочие поля при этом пустые.
+	all := devices[3]
+	if all.Label != "ALL_IDS" || all.UUID != "all-ids-uuid-4444" ||
+		all.PartUUID != "all-ids-partuuid-5555" || all.PartLabel != "ALL_PART" {
+		t.Fatalf("nvme0n1 (все идентификаторы) разобран неверно: %+v", all)
+	}
+	onlyPartUUID := devices[4]
+	if onlyPartUUID.PartUUID != "only-partuuid-6666" ||
+		onlyPartUUID.UUID != "" || onlyPartUUID.Label != "" || onlyPartUUID.PartLabel != "" {
+		t.Fatalf("nvme1n1 (только PARTUUID) разобран неверно: %+v", onlyPartUUID)
+	}
+	onlyPartLabel := devices[5]
+	if onlyPartLabel.PartLabel != "ONLY_PARTLABEL" ||
+		onlyPartLabel.UUID != "" || onlyPartLabel.Label != "" || onlyPartLabel.PartUUID != "" {
+		t.Fatalf("nvme2n1 (только PARTLABEL) разобран неверно: %+v", onlyPartLabel)
 	}
 }
 

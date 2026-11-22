@@ -39,8 +39,13 @@ type Settings struct {
 	LogMaxSizeMB int
 	LogKeep      int
 	TUITheme     string // сохраняется, на CLI не влияет
-	Lang         string // только env/CLI: ru|en
-	Output       string // только env/CLI: table|json|csv|tsv
+	// TUIColors — переопределения ролей палитры из tui.colors (ТЗ v2 этап 4,
+	// пользовательские темы); nil = ключ colors не задан ни на одном уровне
+	// и встроенная палитра темы применяется без изменений. Исходные строки
+	// пользователя: конвертация имён ANSI в номера — при применении в tui.
+	TUIColors map[string]string
+	Lang      string // только env/CLI: ru|en
+	Output    string // только env/CLI: table|json|csv|tsv
 }
 
 // fileConfig — зеркало YAML-схемы ТЗ §13.3; все поля указатели/omitempty-
@@ -59,7 +64,8 @@ type fileConfig struct {
 		Keep      *int    `yaml:"keep"`
 	} `yaml:"log"`
 	TUI *struct {
-		Theme *string `yaml:"theme"`
+		Theme  *string            `yaml:"theme"`
+		Colors *map[string]string `yaml:"colors"`
 	} `yaml:"tui"`
 }
 
@@ -111,16 +117,24 @@ func Load(opts LoadOptions) (Settings, []string, error) {
 	s := Default()
 	warnings := make([]string, 0)
 
+	// loadedPath — путь последнего успешно прочитанного файла конфигурации.
+	// Используется только для диагностики: при отказе валидации tui.colors
+	// ошибка TUIColorError получает этот путь, чтобы сообщение называло
+	// файл-источник, а не пустую строку (автозагрузка идёт без --config).
+	loadedPath := ""
+
 	explicit := opts.ExplicitPath != ""
 	if explicit {
 		if err := loadFileInto(&s, opts.ExplicitPath, opts.EUID, false); err != nil {
 			return s, warnings, err
 		}
+		loadedPath = opts.ExplicitPath
 	} else if opts.EUID != 0 {
 		// Root-процесс не загружает user config автоматически (ТЗ §13.2).
 		if err := loadFileInto(&s, systemConfigPath, opts.EUID, true); err != nil {
 			return s, warnings, err
 		}
+		loadedPath = systemConfigPath
 		home := ""
 		if opts.LookupUser != nil {
 			_, h, err := opts.LookupUser(opts.EUID)
@@ -131,9 +145,11 @@ func Load(opts LoadOptions) (Settings, []string, error) {
 			home = h
 		}
 		if home != "" {
-			if err := loadFileInto(&s, filepath.Join(home, userConfigRelPath), opts.EUID, false); err != nil {
+			userPath := filepath.Join(home, userConfigRelPath)
+			if err := loadFileInto(&s, userPath, opts.EUID, false); err != nil {
 				return s, warnings, err
 			}
+			loadedPath = userPath
 		}
 	}
 
@@ -141,6 +157,14 @@ func Load(opts LoadOptions) (Settings, []string, error) {
 		return s, warnings, err
 	}
 	if err := validateValues(&s); err != nil {
+		// Отказ валидации tui.colors получает путь файла-источника: валидация
+		// идёт по резолвленной палитре, но диагностика должна называть файл,
+		// а cmd-слой при пустом Path в падении на --config (пустой при
+		// автозагрузке) выводил бы «в конфигурации : …».
+		var colorErr *TUIColorError
+		if errors.As(err, &colorErr) && colorErr.Path == "" {
+			colorErr.Path = loadedPath
+		}
 		return s, warnings, err
 	}
 	return s, warnings, nil
@@ -234,8 +258,24 @@ func mergeFileConfig(s *Settings, fc *fileConfig) {
 			s.LogKeep = *fc.Log.Keep
 		}
 	}
-	if fc.TUI != nil && fc.TUI.Theme != nil {
-		s.TUITheme = *fc.TUI.Theme
+	if fc.TUI != nil {
+		if fc.TUI.Theme != nil {
+			s.TUITheme = *fc.TUI.Theme
+		}
+		if fc.TUI.Colors != nil {
+			// Слияние по элементам: роли, заданные на этом уровне,
+			// переопределяют значения нижележащего уровня, не заданные здесь
+			// роли сохраняются (тот же принцип «отсутствующий ключ не затирает
+			// значение», что и для скаляров). Мапа материализуется лениво:
+			// пока colors не задан ни на одном уровне, s.TUIColors остаётся
+			// nil и LoadTheme применяет встроенную палитру без изменений.
+			if s.TUIColors == nil {
+				s.TUIColors = make(map[string]string, len(*fc.TUI.Colors))
+			}
+			for role, color := range *fc.TUI.Colors {
+				s.TUIColors[role] = color
+			}
+		}
 	}
 }
 
@@ -293,6 +333,13 @@ func validateValues(s *Settings) error {
 	case "dark", "light", "high-contrast", "monochrome":
 	default:
 		return fmt.Errorf("некорректный tui.theme %q: допустимы dark, light, high-contrast, monochrome", s.TUITheme)
+	}
+	// ТЗ v2 этап 4 (пользовательские темы): tui.colors — переопределения ролей
+	// палитры поверх встроенной темы. Ключ опционален; неизвестная роль или
+	// цвет невалидного формата отклоняются явной ошибкой TUIColorError —
+	// cmd-слой маппит её на локализованное сообщение и exit code 2.
+	if err := validateTUIColors(s.TUIColors); err != nil {
+		return err
 	}
 	if s.LogMaxSizeMB <= 0 || s.LogKeep <= 0 || s.BackupKeep <= 0 {
 		return errors.New("keep/max_size_mb должны быть положительными")

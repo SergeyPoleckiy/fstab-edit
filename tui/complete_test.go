@@ -93,13 +93,13 @@ func TestOptionHintsFSSpecific(t *testing.T) {
 }
 
 // TestDeviceHintsPriorityUUID проверяет приоритет подставляемого значения
-// (ТЗ п.10): UUID выигрывает у LABEL и пути.
+// (ТЗ v2 этап 3): UUID выигрывает у PARTUUID, LABEL, PARTLABEL и пути.
 func TestDeviceHintsPriorityUUID(t *testing.T) {
 	devices := []sysutil.BlockDevice{
 		{Path: "/dev/sdb1", Type: "part", FSType: "vfat", Size: "16G",
 			Label: "USBKEY", UUID: "BBBB-2222", MountPoint: "/mnt/usb"},
 	}
-	hints := deviceHints(devices)
+	hints := deviceHints("ru", devices)
 	if len(hints) != 1 {
 		t.Fatalf("подсказок: %d, ожидалась 1", len(hints))
 	}
@@ -109,21 +109,22 @@ func TestDeviceHintsPriorityUUID(t *testing.T) {
 }
 
 // TestDeviceHintsPriorityLabelAndPath проверяет fallback-цепочку: без UUID
-// подставляется LABEL=<label>, без UUID и LABEL — путь устройства.
+// и PARTUUID подставляется LABEL=<label>, без всех идентификаторов —
+// путь устройства.
 func TestDeviceHintsPriorityLabelAndPath(t *testing.T) {
 	devices := []sysutil.BlockDevice{
 		{Path: "/dev/sdc1", Type: "part", FSType: "ext4", Size: "256G", Label: "DATA"},
 		{Path: "/dev/sda", Type: "disk", Size: "476.9G"},
 	}
-	hints := deviceHints(devices)
+	hints := deviceHints("ru", devices)
 	if len(hints) != 2 {
 		t.Fatalf("подсказок: %d, ожидалось 2", len(hints))
 	}
 	if hints[0].Value != "LABEL=DATA" {
-		t.Fatalf("Value без UUID: %q, ожидалось %q", hints[0].Value, "LABEL=DATA")
+		t.Fatalf("Value без UUID/PARTUUID: %q, ожидалось %q", hints[0].Value, "LABEL=DATA")
 	}
 	if hints[1].Value != "/dev/sda" {
-		t.Fatalf("Value без UUID/LABEL: %q, ожидался путь /dev/sda", hints[1].Value)
+		t.Fatalf("Value без идентификаторов: %q, ожидался путь /dev/sda", hints[1].Value)
 	}
 }
 
@@ -136,7 +137,7 @@ func TestDeviceHintsInfoFormat(t *testing.T) {
 			Label: "USBKEY", UUID: "BBBB-2222", MountPoint: "/mnt/usb"},
 		{Path: "/dev/sda", Type: "disk", Size: "476.9G"},
 	}
-	hints := deviceHints(devices)
+	hints := deviceHints("ru", devices)
 	info := hints[0].Info
 	for _, part := range []string{"part", "vfat", "16G", "/mnt/usb"} {
 		if !strings.Contains(info, part) {
@@ -151,6 +152,130 @@ func TestDeviceHintsInfoFormat(t *testing.T) {
 	if bare != "disk 476.9G" {
 		t.Fatalf("Info без ФС: %q, ожидалось %q", bare, "disk 476.9G")
 	}
+}
+
+// TestDeviceHintsIdentifierPriority покрывает полный приоритет подстановки
+// ТЗ v2 этап 3 таблично: UUID → PARTUUID → LABEL → PARTLABEL → путь. Каждый
+// случай задаёт ровно один заполненный идентификатор из оставшихся, чтобы
+// цепочка fallback проверялась по одному звену за раз.
+func TestDeviceHintsIdentifierPriority(t *testing.T) {
+	cases := []struct {
+		name   string
+		device sysutil.BlockDevice
+		want   string
+	}{
+		{
+			name: "все идентификаторы → UUID",
+			device: sysutil.BlockDevice{Path: "/dev/sda1", UUID: "u-1",
+				PartUUID: "pu-1", Label: "l-1", PartLabel: "pl-1"},
+			want: "UUID=u-1",
+		},
+		{
+			name: "без UUID → PARTUUID",
+			device: sysutil.BlockDevice{Path: "/dev/sda1",
+				PartUUID: "pu-2", Label: "l-2", PartLabel: "pl-2"},
+			want: "PARTUUID=pu-2",
+		},
+		{
+			name: "без UUID и PARTUUID → LABEL",
+			device: sysutil.BlockDevice{Path: "/dev/sda1",
+				Label: "l-3", PartLabel: "pl-3"},
+			want: "LABEL=l-3",
+		},
+		{
+			name:   "только PARTLABEL → PARTLABEL",
+			device: sysutil.BlockDevice{Path: "/dev/sda1", PartLabel: "pl-4"},
+			want:   "PARTLABEL=pl-4",
+		},
+		{
+			name:   "без идентификаторов → путь",
+			device: sysutil.BlockDevice{Path: "/dev/sda1"},
+			want:   "/dev/sda1",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hints := deviceHints("ru", []sysutil.BlockDevice{tc.device})
+			if len(hints) != 1 {
+				t.Fatalf("подсказок: %d, ожидалась 1", len(hints))
+			}
+			if hints[0].Value != tc.want {
+				t.Fatalf("Value: %q, ожидалось %q", hints[0].Value, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeviceHintsDuplicateMarker проверяет пометку повторяющихся
+// идентификаторов (ТЗ v2 этап 3): если выбранное для устройства значение
+// встречается более чем у одного устройства, Info получает локализованный
+// суффикс-маркер; уникальные идентификаторы и fallback-пути остаются
+// без пометки. Проверяются дубликаты на двух уровнях приоритета — UUID и
+// PARTUUID — и оба языка каталога.
+func TestDeviceHintsDuplicateMarker(t *testing.T) {
+	devices := []sysutil.BlockDevice{
+		// Два раздела с одинаковым UUID (типичный след клонирования диска):
+		// обе подсказки обязаны быть помечены.
+		{Path: "/dev/sda1", Type: "part", FSType: "ext4", Size: "100G", UUID: "DUP-UUID"},
+		{Path: "/dev/sdb1", Type: "part", FSType: "xfs", Size: "200G", UUID: "DUP-UUID"},
+		// Уникальный UUID — без пометки.
+		{Path: "/dev/sdc1", Type: "part", FSType: "btrfs", Size: "300G", UUID: "UNIQ-UUID"},
+		// Два раздела с одинаковым PARTUUID (UUID тома отсутствует, выбран
+		// следующий по приоритету идентификатор): тоже помечаются.
+		{Path: "/dev/sdd1", Type: "part", FSType: "ext4", Size: "400G", PartUUID: "DUP-PUUID"},
+		{Path: "/dev/sde1", Type: "part", FSType: "ext4", Size: "500G", PartUUID: "DUP-PUUID"},
+		// Без единого идентификатора: подставляется путь, пометка невозможна.
+		{Path: "/dev/sdf", Type: "disk", Size: "600G"},
+	}
+
+	t.Run("русский маркер", func(t *testing.T) {
+		hints := deviceHints("ru", devices)
+		if len(hints) != len(devices) {
+			t.Fatalf("подсказок: %d, ожидалось %d", len(hints), len(devices))
+		}
+		marker := "(не уникальный идентификатор)"
+		for _, i := range []int{0, 1, 3, 4} {
+			if !strings.HasSuffix(hints[i].Info, " "+marker) {
+				t.Fatalf("Info[%d] %q должна оканчиваться маркером %q", i, hints[i].Info, marker)
+			}
+		}
+		for _, i := range []int{2, 5} {
+			if strings.Contains(hints[i].Info, marker) {
+				t.Fatalf("Info[%d] %q не должна содержать маркер дубликата", i, hints[i].Info)
+			}
+		}
+	})
+
+	t.Run("английский маркер", func(t *testing.T) {
+		hints := deviceHints("en", devices[:2])
+		marker := "(non-unique identifier)"
+		for i, hint := range hints {
+			if !strings.HasSuffix(hint.Info, " "+marker) {
+				t.Fatalf("Info[%d] %q должна оканчиваться маркером %q", i, hint.Info, marker)
+			}
+		}
+	})
+
+	// Пустая правая колонка: у устройств нет ни TYPE, ни FSType, ни Size, ни
+	// точки монтирования, ни метки — Info собирается в пустую строку. Маркер
+	// обязан дописаться без ведущего пробела, чтобы подсказка не начиналась
+	// с разделителя. Этим закрывается ветка «пустой Info» логики дубликатов.
+	t.Run("пустой Info — маркер без ведущего пробела", func(t *testing.T) {
+		bare := []sysutil.BlockDevice{
+			{Path: "/dev/sdg1", UUID: "DUP-BARE"},
+			{Path: "/dev/sdh1", UUID: "DUP-BARE"},
+		}
+		hints := deviceHints("ru", bare)
+		if len(hints) != len(bare) {
+			t.Fatalf("подсказок: %d, ожидалось %d", len(hints), len(bare))
+		}
+		marker := "(не уникальный идентификатор)"
+		for i, hint := range hints {
+			if hint.Info != marker {
+				t.Fatalf("Info[%d] %q должна состоять ровно из маркера %q без ведущего пробела", i, hint.Info, marker)
+			}
+		}
+	})
 }
 
 // TestOptionHintsEdgeTokens проверяет граничные токены: trailing comma

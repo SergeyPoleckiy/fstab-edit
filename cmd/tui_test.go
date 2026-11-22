@@ -8,6 +8,7 @@
 package cmd_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -166,5 +167,52 @@ func TestTuiRespectsLangAndThemeFromConfig(t *testing.T) {
 	}
 	if opts.Target != target {
 		t.Fatalf("Target = %q, want %q", opts.Target, target)
+	}
+}
+
+// TestTuiPassesThemeOverridesFromConfig проверяет проброс пользовательской
+// палитры: tui.colors из YAML-конфигурации доезжает до tui.Options.ThemeOverrides
+// (этап 5, Task 3: пользовательские темы), без ключа colors проброс nil.
+func TestTuiPassesThemeOverridesFromConfig(t *testing.T) {
+	launcher := &tuiLauncherCapture{}
+	buffers := &appBuffers{}
+	target := writeTempTarget(t, "UUID=aaa / ext4 defaults 0 1\n")
+	configPath := writeTestConfig(t, "tui:\n  theme: dark\n  colors:\n    title: \"#00ffff\"\n    selected_fg: \"0\"\n")
+	app := cmd.NewApp(cmd.AppOptions{
+		Stdout:            &buffers.stdout,
+		Stderr:            &buffers.stderr,
+		TTY:               func() bool { return true },
+		Runner:            &fakeRunner{},
+		Getenv:            func(string) string { return "" },
+		Environ:           func() []string { return nil },
+		DefaultConfigPath: configPath,
+		TuiLauncher:       launcher.launch,
+	})
+	if code := app.Execute([]string{"tui", "--file", target}); code != 0 {
+		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
+	}
+	want := map[string]string{"title": "#00ffff", "selected_fg": "0"}
+	if !reflect.DeepEqual(launcher.opts.ThemeOverrides, want) {
+		t.Fatalf("ThemeOverrides = %+v, want %+v", launcher.opts.ThemeOverrides, want)
+	}
+
+	// Без tui.colors в конфигурации проброс nil: палитра темы без изменений.
+	launcher = &tuiLauncherCapture{}
+	buffers = &appBuffers{}
+	app = cmd.NewApp(cmd.AppOptions{
+		Stdout:            &buffers.stdout,
+		Stderr:            &buffers.stderr,
+		TTY:               func() bool { return true },
+		Runner:            &fakeRunner{},
+		Getenv:            func(string) string { return "" },
+		Environ:           func() []string { return nil },
+		DefaultConfigPath: testLogConfig(t),
+		TuiLauncher:       launcher.launch,
+	})
+	if code := app.Execute([]string{"tui", "--file", target}); code != 0 {
+		t.Fatalf("code = %d, want 0; stderr: %s", code, buffers.stderr.String())
+	}
+	if launcher.opts.ThemeOverrides != nil {
+		t.Fatalf("ThemeOverrides = %+v, want nil без tui.colors", launcher.opts.ThemeOverrides)
 	}
 }

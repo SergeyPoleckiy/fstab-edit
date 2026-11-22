@@ -7,8 +7,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // testLookupUser подменяет LookupUser: uid 0 → root с home из tempdir,
@@ -21,6 +24,12 @@ func testLookupUser(home string) func(int) (string, string, error) {
 		return "user", home, nil
 	}
 }
+
+// testEUID — effective UID текущего процесса. Файлы t.TempDir() всегда
+// принадлежат ему, поэтому загрузку в тестах вызываем с ним: хардкод
+// конкретного uid (1000) ломал прогон на любой машине, где uid пользователя
+// иной (GitHub Actions использует uid 1001 — отсюда и выбор os.Geteuid()).
+var testEUID = os.Geteuid()
 
 // writeConfig пишет YAML в tempdir и возвращает путь.
 func writeConfig(t *testing.T, dir, name, content string) string {
@@ -42,6 +51,17 @@ func writeUserConfig(t *testing.T, home, content string) string {
 	return writeConfig(t, dir, "config.yaml", content)
 }
 
+// parseFileConfig декодирует YAML-фрагмент в fileConfig; нужен unit-тестам
+// слияния уровней (mergeFileConfig), которым файловая система не требуется.
+func parseFileConfig(t *testing.T, content string) *fileConfig {
+	t.Helper()
+	var fc fileConfig
+	if err := yaml.Unmarshal([]byte(content), &fc); err != nil {
+		t.Fatalf("parseFileConfig %q: %v", content, err)
+	}
+	return &fc
+}
+
 // stubSystemConfig перенаправляет systemConfigPath в несуществующий файл
 // tempdir, чтобы тесты никогда не читали реальный /etc/fstab-edit.
 func stubSystemConfig(t *testing.T) string {
@@ -57,7 +77,7 @@ func stubSystemConfig(t *testing.T) string {
 // config-файлах Load возвращает значения Default() без warning'ов.
 func TestLoadDefaults(t *testing.T) {
 	stubSystemConfig(t)
-	s, warnings, err := Load(LoadOptions{Environ: nil, EUID: 1000, LookupUser: testLookupUser(t.TempDir())})
+	s, warnings, err := Load(LoadOptions{Environ: nil, EUID: testEUID, LookupUser: testLookupUser(t.TempDir())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,13 +95,13 @@ func TestLoadDefaults(t *testing.T) {
 // env выше user/system, user выше system, system доезжает своими ключами.
 // Системная и пользовательская части разнесены по subtest'ам: system config
 // обязан принадлежать root (может создать только root-процесс), а user
-// config при Load(EUID=1000) обязан принадлежать uid 1000 (при root-прогоне
+// config при Load(testEUID) обязан принадлежать этому же uid (при root-прогоне
 // файлы в tempdir принадлежат uid 0) — одновременно обе части в одном
 // окружении воспроизвести невозможно.
 func TestLoadPriorityCLIEnvUserSystemDefaults(t *testing.T) {
 	t.Run("env-over-user", func(t *testing.T) {
 		if os.Geteuid() == 0 {
-			t.Skip("user config при Load(EUID=1000) должен принадлежать uid 1000; под root файлы tempdir принадлежат uid 0")
+			t.Skip("user config при Load(testEUID) должен принадлежать testEUID; под root файлы tempdir принадлежат uid 0")
 		}
 		stubSystemConfig(t)
 		home := t.TempDir()
@@ -89,7 +109,7 @@ func TestLoadPriorityCLIEnvUserSystemDefaults(t *testing.T) {
 
 		s, _, err := Load(LoadOptions{
 			Environ:    []string{"FSTAB_EDIT_FILE=/from-env"},
-			EUID:       1000,
+			EUID:       testEUID,
 			LookupUser: testLookupUser(home),
 		})
 		if err != nil {
@@ -113,7 +133,7 @@ func TestLoadPriorityCLIEnvUserSystemDefaults(t *testing.T) {
 
 		s, _, err := Load(LoadOptions{
 			Environ:    []string{"FSTAB_EDIT_FILE=/from-env"},
-			EUID:       1000,
+			EUID:       testEUID,
 			LookupUser: testLookupUser(t.TempDir()),
 		})
 		if err != nil {
@@ -136,7 +156,7 @@ func TestLoadPriorityCLIEnvUserSystemDefaults(t *testing.T) {
 // ключ explicit перекрывается env.
 func TestLoadExplicitPath(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("при root-прогоне tempdir-файлы принадлежат uid 0 и не проходят ownership при Load(EUID=1000)")
+		t.Skip("при root-прогоне tempdir-файлы принадлежат uid 0 и не проходят ownership при Load(testEUID)")
 	}
 	systemPath := stubSystemConfig(t)
 	// system config существует и валиден, но не должен быть прочитан.
@@ -151,7 +171,7 @@ func TestLoadExplicitPath(t *testing.T) {
 	s, _, err := Load(LoadOptions{
 		ExplicitPath: explicit,
 		Environ:      []string{"FSTAB_EDIT_FILE=/from-env"},
-		EUID:         1000,
+		EUID:         testEUID,
 		LookupUser:   testLookupUser(home),
 	})
 	if err != nil {
@@ -177,7 +197,7 @@ func TestLoadUnknownEnvWarns(t *testing.T) {
 	stubSystemConfig(t)
 	s, warnings, err := Load(LoadOptions{
 		Environ:    []string{"FSTAB_EDIT_FOO=bar"},
-		EUID:       1000,
+		EUID:       testEUID,
 		LookupUser: testLookupUser(t.TempDir()),
 	})
 	if err != nil {
@@ -189,7 +209,7 @@ func TestLoadUnknownEnvWarns(t *testing.T) {
 	if !strings.Contains(warnings[0], "FSTAB_EDIT_FOO") {
 		t.Fatalf("warning не упоминает переменную: %q", warnings[0])
 	}
-	if s != Default() {
+	if !reflect.DeepEqual(s, Default()) {
 		t.Fatalf("Settings изменились: %+v", s)
 	}
 }
@@ -202,7 +222,7 @@ func TestLoadUnknownYAMLKeyErrors(t *testing.T) {
 	_, _, err := Load(LoadOptions{
 		ExplicitPath: explicit,
 		Environ:      nil,
-		EUID:         1000,
+		EUID:         testEUID,
 		LookupUser:   testLookupUser(t.TempDir()),
 	})
 	if err == nil {
@@ -226,7 +246,7 @@ func TestLoadInvalidValuesError(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stubSystemConfig(t)
-			opts := LoadOptions{Environ: tc.environ, EUID: 1000, LookupUser: testLookupUser(t.TempDir())}
+			opts := LoadOptions{Environ: tc.environ, EUID: testEUID, LookupUser: testLookupUser(t.TempDir())}
 			if tc.yaml != "" {
 				opts.ExplicitPath = writeConfig(t, t.TempDir(), "explicit.yaml", tc.yaml)
 			}
@@ -248,7 +268,7 @@ func TestLoadValidTUIThemes(t *testing.T) {
 			opts := LoadOptions{
 				ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  theme: "+theme+"\n"),
 				Environ:      nil,
-				EUID:         1000,
+				EUID:         testEUID,
 				LookupUser:   testLookupUser(t.TempDir()),
 			}
 			s, _, err := Load(opts)
@@ -270,7 +290,7 @@ func TestLoadInvalidTUIThemeMessage(t *testing.T) {
 	_, _, err := Load(LoadOptions{
 		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  theme: neon\n"),
 		Environ:      nil,
-		EUID:         1000,
+		EUID:         testEUID,
 		LookupUser:   testLookupUser(t.TempDir()),
 	})
 	if err == nil {
@@ -300,7 +320,7 @@ func TestLoadRejectsSymlink(t *testing.T) {
 	_, _, err := Load(LoadOptions{
 		ExplicitPath: link,
 		Environ:      nil,
-		EUID:         1000,
+		EUID:         testEUID,
 		LookupUser:   testLookupUser(t.TempDir()),
 	})
 	if err == nil {
@@ -344,7 +364,7 @@ func TestLoadUserConfigOwnershipAndMode(t *testing.T) {
 		if err := os.Chmod(path, 0o660); err != nil {
 			t.Fatal(err)
 		}
-		_, _, err := Load(LoadOptions{Environ: nil, EUID: 1000, LookupUser: testLookupUser(home)})
+		_, _, err := Load(LoadOptions{Environ: nil, EUID: testEUID, LookupUser: testLookupUser(home)})
 		if err == nil {
 			t.Fatal("ожидалась ошибка на group-writable user config")
 		}
@@ -374,7 +394,7 @@ func TestLoadSystemConfigOwnership(t *testing.T) {
 		if err := os.Chmod(systemPath, 0o660); err != nil {
 			t.Fatal(err)
 		}
-		_, _, err := Load(LoadOptions{Environ: nil, EUID: 1000, LookupUser: testLookupUser(t.TempDir())})
+		_, _, err := Load(LoadOptions{Environ: nil, EUID: testEUID, LookupUser: testLookupUser(t.TempDir())})
 		if err == nil {
 			t.Fatal("ожидалась ошибка на group-writable system config")
 		}
@@ -388,7 +408,7 @@ func TestLoadSystemConfigOwnership(t *testing.T) {
 		}
 		systemPath := stubSystemConfig(t)
 		writeConfig(t, filepath.Dir(systemPath), "config.yaml", "log:\n  level: warn\n")
-		_, _, err := Load(LoadOptions{Environ: nil, EUID: 1000, LookupUser: testLookupUser(t.TempDir())})
+		_, _, err := Load(LoadOptions{Environ: nil, EUID: testEUID, LookupUser: testLookupUser(t.TempDir())})
 		if err == nil {
 			t.Fatal("ожидалась ошибка: system config не принадлежит root")
 		}
@@ -399,7 +419,7 @@ func TestLoadSystemConfigOwnership(t *testing.T) {
 // возвращённом LookupUser по effective UID, а не в непроверенном HOME.
 func TestLookupHomeByEffectiveUID(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("при root-прогоне tempdir-файлы принадлежат uid 0 и не проходят ownership при Load(EUID=1000)")
+		t.Skip("при root-прогоне tempdir-файлы принадлежат uid 0 и не проходят ownership при Load(testEUID)")
 	}
 	stubSystemConfig(t)
 	envHome := t.TempDir()
@@ -409,7 +429,7 @@ func TestLookupHomeByEffectiveUID(t *testing.T) {
 
 	s, _, err := Load(LoadOptions{
 		Environ:    []string{"HOME=" + envHome},
-		EUID:       1000,
+		EUID:       testEUID,
 		LookupUser: testLookupUser(passwdHome),
 	})
 	if err != nil {
@@ -417,5 +437,225 @@ func TestLookupHomeByEffectiveUID(t *testing.T) {
 	}
 	if s.FstabPath != "/from-passwd-home" {
 		t.Fatalf("FstabPath: got %q, want user config из home LookupUser", s.FstabPath)
+	}
+}
+
+// TestLoadTUIColorsValid проверяет, что tui.colors со всеми тринадцатью
+// ролями и всеми тремя форматами цвета (hex #rrggbb любого регистра, номер
+// ANSI 0–255, имя ANSI-цвета включая bright-варианты) принимается валидацией
+// и резолвится в Settings.TUIColors без изменений (имена не нормализуются:
+// конвертация в номера — при применении в tui.LoadTheme).
+func TestLoadTUIColorsValid(t *testing.T) {
+	stubSystemConfig(t)
+	yaml := `
+tui:
+  theme: dark
+  colors:
+    title: "#00ffff"
+    header: "#FF00AA"
+    selected_fg: "0"
+    selected_bg: "255"
+    muted: black
+    info: bright_white
+    dirty: red
+    error: "196"
+    warning: bright_red
+    field_source: "#abcdef"
+    field_mount: "28"
+    field_fstype: bright_yellow
+    field_options: "007"
+`
+	s, _, err := Load(LoadOptions{
+		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", yaml),
+		Environ:      nil,
+		EUID:         testEUID,
+		LookupUser:   testLookupUser(t.TempDir()),
+	})
+	if err != nil {
+		t.Fatalf("валидная палитра должна приниматься: %v", err)
+	}
+	want := map[string]string{
+		"title": "#00ffff", "header": "#FF00AA", "selected_fg": "0",
+		"selected_bg": "255", "muted": "black", "info": "bright_white",
+		"dirty": "red", "error": "196", "warning": "bright_red",
+		"field_source": "#abcdef", "field_mount": "28",
+		"field_fstype": "bright_yellow", "field_options": "007",
+	}
+	if !reflect.DeepEqual(s.TUIColors, want) {
+		t.Fatalf("TUIColors = %+v, want %+v", s.TUIColors, want)
+	}
+}
+
+// TestLoadTUIColorsEmptyMapValid проверяет, что пустой блок colors валиден:
+// он материализуется в пустую мапу (не nil — ключ был задан явно), что
+// эквивалентно отсутствию переопределений.
+func TestLoadTUIColorsEmptyMapValid(t *testing.T) {
+	stubSystemConfig(t)
+	s, _, err := Load(LoadOptions{
+		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  colors: {}\n"),
+		Environ:      nil,
+		EUID:         testEUID,
+		LookupUser:   testLookupUser(t.TempDir()),
+	})
+	if err != nil {
+		t.Fatalf("пустой tui.colors должен приниматься: %v", err)
+	}
+	if s.TUIColors == nil || len(s.TUIColors) != 0 {
+		t.Fatalf("TUIColors = %+v, want пустая не-nil мапа", s.TUIColors)
+	}
+}
+
+// TestLoadTUIColorsInvalid проверяет табличные отказы валидации tui.colors:
+// неизвестная роль (в любом регистре) и цвета невалидного формата — частичные
+// hex (#rgb, 5/8 цифр, не-hex символы), числа вне 0–255, строки с не-цифрами,
+// неизвестные имена, регистр имён, пробелы, пустые значения. Каждый кейс даёт
+// *TUIColorError с причиной и отклонённой парой.
+func TestLoadTUIColorsInvalid(t *testing.T) {
+	cases := []struct {
+		name   string
+		yaml   string
+		reason TUIColorReason
+		role   string
+		value  string
+	}{
+		{"неизвестная роль", "tui:\n  colors:\n    nonsense: red\n", TUIColorUnknownRole, "nonsense", "red"},
+		{"роль в верхнем регистре", "tui:\n  colors:\n    Title: red\n", TUIColorUnknownRole, "Title", "red"},
+		{"роль severity", "tui:\n  colors:\n    sev_error: red\n", TUIColorUnknownRole, "sev_error", "red"},
+		{"hex сокращённый #rgb", "tui:\n  colors:\n    title: \"#0f0\"\n", TUIColorInvalidColor, "title", "#0f0"},
+		{"hex пять цифр", "tui:\n  colors:\n    title: \"#00ff0\"\n", TUIColorInvalidColor, "title", "#00ff0"},
+		{"hex восемь цифр", "tui:\n  colors:\n    title: \"#00ff00f\"\n", TUIColorInvalidColor, "title", "#00ff00f"},
+		{"hex не-hex символ", "tui:\n  colors:\n    title: \"#00ff0g\"\n", TUIColorInvalidColor, "title", "#00ff0g"},
+		{"hex без решётки", "tui:\n  colors:\n    title: 00ff00\n", TUIColorInvalidColor, "title", "00ff00"},
+		{"номер 256", "tui:\n  colors:\n    title: \"256\"\n", TUIColorInvalidColor, "title", "256"},
+		{"отрицательный номер", "tui:\n  colors:\n    title: \"-1\"\n", TUIColorInvalidColor, "title", "-1"},
+		{"номер со знаком", "tui:\n  colors:\n    title: \"+5\"\n", TUIColorInvalidColor, "title", "+5"},
+		{"номер с буквой", "tui:\n  colors:\n    title: \"12a\"\n", TUIColorInvalidColor, "title", "12a"},
+		{"пустое значение", "tui:\n  colors:\n    title: \"\"\n", TUIColorInvalidColor, "title", ""},
+		{"неизвестное имя", "tui:\n  colors:\n    title: gray\n", TUIColorInvalidColor, "title", "gray"},
+		{"имя в CamelCase", "tui:\n  colors:\n    title: Bright_Red\n", TUIColorInvalidColor, "title", "Bright_Red"},
+		{"имя с пробелом", "tui:\n  colors:\n    title: \"red \"\n", TUIColorInvalidColor, "title", "red "},
+		{"пробел перед номером", "tui:\n  colors:\n    title: \" 12\"\n", TUIColorInvalidColor, "title", " 12"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubSystemConfig(t)
+			explicitPath := writeConfig(t, t.TempDir(), "explicit.yaml", tc.yaml)
+			_, _, err := Load(LoadOptions{
+				ExplicitPath: explicitPath,
+				Environ:      nil,
+				EUID:         testEUID,
+				LookupUser:   testLookupUser(t.TempDir()),
+			})
+			if err == nil {
+				t.Fatalf("ожидался отказ валидации tui.colors (%s)", tc.name)
+			}
+			var colorErr *TUIColorError
+			if !errors.As(err, &colorErr) {
+				t.Fatalf("ошибка должна быть *TUIColorError, got: %T %v", err, err)
+			}
+			if colorErr.Reason != tc.reason {
+				t.Fatalf("Reason = %q, want %q", colorErr.Reason, tc.reason)
+			}
+			if colorErr.Role != tc.role || colorErr.Value != tc.value {
+				t.Fatalf("отклонённая пара = (%q, %q), want (%q, %q)",
+					colorErr.Role, colorErr.Value, tc.role, tc.value)
+			}
+			// Load обязан сообщить путь файла-источника: сообщение об ошибке
+			// называет файл, без него пользователь автозагрузки не поймёт,
+			// какая из конфигураций отклонена.
+			if colorErr.Path != explicitPath {
+				t.Fatalf("Path = %q, want %q (путь explicit-конфига)", colorErr.Path, explicitPath)
+			}
+		})
+	}
+}
+
+// TestLoadTUIColorsLeadingZeros фиксирует границу «номер ANSI с ведущими
+// нулями»: "00" и "007" — валидные номера (strconv.Atoi даёт 0 и 7 в
+// диапазоне 0–255). Регрессия здесь дешевле дисциплины: явный кейс
+// запрещает будущему рефактору валидации случайно отклонить ведущие нули.
+func TestLoadTUIColorsLeadingZeros(t *testing.T) {
+	stubSystemConfig(t)
+	yaml := `
+tui:
+  colors:
+    info: "00"
+    warning: "007"
+`
+	s, _, err := Load(LoadOptions{
+		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", yaml),
+		Environ:      nil,
+		EUID:         testEUID,
+		LookupUser:   testLookupUser(t.TempDir()),
+	})
+	if err != nil {
+		t.Fatalf("номера с ведущими нулями должны приниматься: %v", err)
+	}
+	if s.TUIColors["info"] != "00" || s.TUIColors["warning"] != "007" {
+		t.Fatalf("TUIColors = %+v, want info=00 warning=007", s.TUIColors)
+	}
+}
+
+// TestLoadInvalidTUIColorsMessage проверяет, что сообщения об отказе палитры
+// содержат отклонённую роль/значение и (для неизвестной роли) полный список
+// допустимых ролей — пользователь должен понять причину без чтения кода.
+func TestLoadInvalidTUIColorsMessage(t *testing.T) {
+	stubSystemConfig(t)
+	_, _, err := Load(LoadOptions{
+		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  colors:\n    nonsense: red\n"),
+		Environ:      nil,
+		EUID:         testEUID,
+		LookupUser:   testLookupUser(t.TempDir()),
+	})
+	if err == nil {
+		t.Fatal("ожидался отказ на неизвестную роль")
+	}
+	msg := err.Error()
+	for _, want := range []string{"nonsense", "title", "header", "selected_fg", "field_options"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("сообщение должно содержать %q: %q", want, msg)
+		}
+	}
+
+	stubSystemConfig(t)
+	_, _, err = Load(LoadOptions{
+		ExplicitPath: writeConfig(t, t.TempDir(), "explicit.yaml", "tui:\n  colors:\n    title: \"#0f0\"\n"),
+		Environ:      nil,
+		EUID:         testEUID,
+		LookupUser:   testLookupUser(t.TempDir()),
+	})
+	if err == nil {
+		t.Fatal("ожидался отказ на невалидный формат")
+	}
+	msg = err.Error()
+	for _, want := range []string{"#0f0", "title", "#rrggbb"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("сообщение должно содержать %q: %q", want, msg)
+		}
+	}
+}
+
+// TestMergeFileConfigTUIColorsMergesLevels проверяет послойное слияние
+// tui.colors: роль, заданная на старшем уровне, переопределяет значение
+// нижележащего уровня, а не заданные на старшем уровне роли сохраняются
+// (тот же принцип «отсутствующий ключ не затирает», что и для скаляров).
+func TestMergeFileConfigTUIColorsMergesLevels(t *testing.T) {
+	s := Default()
+	system := parseFileConfig(t, "tui:\n  colors:\n    error: \"196\"\n    title: \"#111111\"\n")
+	user := parseFileConfig(t, "tui:\n  colors:\n    title: \"#00ffff\"\n")
+	mergeFileConfig(&s, system)
+	mergeFileConfig(&s, user)
+	if s.TUIColors["title"] != "#00ffff" {
+		t.Fatalf("title = %q, want user-значение #00ffff", s.TUIColors["title"])
+	}
+	if s.TUIColors["error"] != "196" {
+		t.Fatalf("error = %q, want system-значение 196 (user-уровень его не затирал)", s.TUIColors["error"])
+	}
+	// Без colors на всех уровнях мапа остаётся nil: LoadTheme применяет
+	// встроенную палитру без изменений.
+	plain := Default()
+	mergeFileConfig(&plain, parseFileConfig(t, "tui:\n  theme: light\n"))
+	if plain.TUIColors != nil {
+		t.Fatalf("TUIColors = %+v, want nil без ключа colors", plain.TUIColors)
 	}
 }

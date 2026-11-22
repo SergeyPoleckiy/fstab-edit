@@ -407,9 +407,12 @@ func TestFormCompletionFlow(t *testing.T) {
 	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
 
 	// Ctrl+N — первая подсказка устройства подставлена в поле device.
+	// Проверяем именно строку поля («метка» + значение), а не панель
+	// подсказок: панель показывает UUID=CCCC-3333 уже при открытии формы,
+	// поэтому поиск одного только значения пропустил бы сломанную подстановку.
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlN})
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
-		return strings.Contains(string(b), "UUID=CCCC-3333")
+		return strings.Contains(string(b), "Устройство (UUID=/LABEL=/путь) UUID=CCCC-3333")
 	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
 
 	// Esc — отмена формы без подтверждения: возврат на таблицу, сессия чистая.

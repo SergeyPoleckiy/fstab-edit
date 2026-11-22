@@ -242,6 +242,22 @@ TUI theme:
 .IR dark ", " light ", " high\-contrast " or " monochrome
 (default:
 .IR dark ).
+.TP
+.BI tui.colors
+Per\-role color overrides on top of
+.BR tui.theme
+(works with
+.IR monochrome
+too). Color formats: hex
+.IR #rrggbb ,
+an ANSI number 0\(en255 or an ANSI color name
+.RI ( black ", " red ", " green ", " yellow ", " blue ", " magenta ", " cyan ", " white
+and their
+.IR bright_ "variants)."
+Roles:
+.IR title ", " header ", " selected_fg ", " selected_bg ", " muted ", " info ", " dirty ", " error ", " warning ", " field_source ", " field_mount ", " field_fstype " or " field_options .
+An unknown role or an invalid color value is rejected at startup
+(exit status 2).
 .SH FILES
 .TP
 .B ~/.config/fstab\-edit/config.yaml

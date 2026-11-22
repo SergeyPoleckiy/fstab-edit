@@ -9,6 +9,8 @@
          "mountpoint": null,
          "label": null,
          "uuid": null,
+         "partuuid": null,
+         "partlabel": null,
          "model": "Samsung_SSD_870_EVO",
          "children": [
             {
@@ -20,6 +22,8 @@
                "mountpoint": "/boot/efi",
                "label": "EFI",
                "uuid": "AAAA-1111",
+               "partuuid": "efi-partuuid-7777",
+               "partlabel": "EFI_PART",
                "model": null
             },
             {
@@ -31,6 +35,8 @@
                "mountpoint": null,
                "label": null,
                "uuid": "lvm-pv-uuid-0000",
+               "partuuid": null,
+               "partlabel": null,
                "model": null,
                "children": [
                   {
@@ -42,6 +48,8 @@
                      "mountpoint": "/",
                      "label": null,
                      "uuid": "root-uuid-2222",
+                     "partuuid": null,
+                     "partlabel": null,
                      "model": null
                   },
                   {
@@ -53,6 +61,8 @@
                      "mountpoint": "/home",
                      "label": "HOME",
                      "uuid": "home-uuid-3333",
+                     "partuuid": null,
+                     "partlabel": null,
                      "model": null
                   }
                ]
@@ -68,6 +78,8 @@
          "mountpoint": null,
          "label": "INSTALL_DISC",
          "uuid": "2026-11-21-00-00-00-00",
+         "partuuid": null,
+         "partlabel": null,
          "model": "DVD+-RW_DVD8801"
       },
       {
@@ -79,6 +91,47 @@
          "mountpoint": "/snap/core",
          "label": null,
          "uuid": null,
+         "partuuid": null,
+         "partlabel": null,
+         "model": null
+      },
+      {
+         "name": "nvme0n1",
+         "path": "/dev/nvme0n1",
+         "type": "disk",
+         "fstype": null,
+         "size": "1.8T",
+         "mountpoint": null,
+         "label": "ALL_IDS",
+         "uuid": "all-ids-uuid-4444",
+         "partuuid": "all-ids-partuuid-5555",
+         "partlabel": "ALL_PART",
+         "model": "Samsung_SSD_980_PRO"
+      },
+      {
+         "name": "nvme1n1",
+         "path": "/dev/nvme1n1",
+         "type": "part",
+         "fstype": "ext4",
+         "size": "100G",
+         "mountpoint": null,
+         "label": null,
+         "uuid": null,
+         "partuuid": "only-partuuid-6666",
+         "partlabel": null,
+         "model": null
+      },
+      {
+         "name": "nvme2n1",
+         "path": "/dev/nvme2n1",
+         "type": "part",
+         "fstype": "xfs",
+         "size": "200G",
+         "mountpoint": null,
+         "label": null,
+         "uuid": null,
+         "partuuid": null,
+         "partlabel": "ONLY_PARTLABEL",
          "model": null
       }
    ]

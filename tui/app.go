@@ -49,10 +49,17 @@ type Options struct {
 	Target string // target fstab (default /etc/fstab, --file переопределяет)
 	Lang   string // резолвленный язык ru|en
 	Theme  string // tui.theme из config: "dark" (default) | "light" | "high-contrast" | "monochrome"
-	Backup BackupSettings
-	Log    LogSettings
-	Runner sysutil.CommandRunner // findmnt; тесты подменяют
-	Deps   *Deps                 // nil → ProductionDeps
+	// ThemeOverrides — переопределения ролей палитры из tui.colors
+	// (config.Settings.TUIColors, ТЗ v2 этап 4: пользовательские темы);
+	// nil или пусто = встроенная палитра темы без изменений. Формат значений
+	// валидирует internal/config (hex #rrggbb, номер ANSI 0–255 или имя
+	// ANSI-цвета), LoadTheme применяет их поверх любой базовой темы,
+	// включая monochrome.
+	ThemeOverrides map[string]string
+	Backup         BackupSettings
+	Log            LogSettings
+	Runner         sysutil.CommandRunner // findmnt; тесты подменяют
+	Deps           *Deps                 // nil → ProductionDeps
 }
 
 // BackupSettings — dir/prefix/keep из config (пустой dir = каталог target).
@@ -121,7 +128,7 @@ func (m *model) deps() *Deps {
 // NewModel загружает target и собирает начальное состояние. Ошибка загрузки
 // не паникует: показывается статусная строка с предложением F5.
 func NewModel(opts Options) tea.Model {
-	m := model{opts: opts, theme: LoadTheme(opts.Theme), screen: ScreenTable}
+	m := model{opts: opts, theme: LoadTheme(opts.Theme, opts.ThemeOverrides), screen: ScreenTable}
 	deps := opts.Deps
 	if deps == nil {
 		d := ProductionDeps(loggerOptions(opts))

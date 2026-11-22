@@ -136,9 +136,9 @@ make            # сборка статического бинаря ./fstab-edi
 make build      # то же явно; версия из git describe
 make version    # версия, которую получит следующая сборка
 make test       # go test ./...
-make install    # сборка + установка бинаря и man-страницы (PREFIX, DESTDIR)
+make install    # сборка + установка бинаря и man-страниц RU+EN (PREFIX, DESTDIR)
 make uninstall  # удаление установленных файлов
-make pdf        # PDF руководства пользователя (pandoc + xelatex)
+make pdf        # PDF руководства пользователя RU+EN (pandoc + xelatex)
 make clean      # удалить локальный бинарь
 ```
 
@@ -157,6 +157,9 @@ go test -race ./...   # рекомендуется для изменений в 
 - **Язык:** все комментарии, сообщения об ошибках и пользовательский текст
   (RU-часть) — на русском. Каталоги i18n (`tui.*`, CLI-сообщения) добавляются
   парно RU/EN; коды, severity и поля machine-форматов не локализуются.
+  README и руководство пользователя — двуязычные: `README.md` (EN, основной)
+  + `README.ru.md`, `docs/user-guide.md` (RU) + `docs/user-guide.en.md` (EN).
+  Man-страницы — две: `fstab-edit.1` (EN) + `fstab-edit.ru.1` (RU).
 - **TDD:** сначала тест, потом реализация. Каждый фикс бага начинается с
   падающего теста.
 - **Тесты изолированы:** только временные каталоги (`t.TempDir()`) и fake seams
@@ -193,7 +196,14 @@ go test -race ./...   # рекомендуется для изменений в 
    публикация: `git push origin vX.Y`.
 5. Сборка из тега: `make build` — версия бинаря будет ровно `vX.Y`
    (проверить `make version` и `./fstab-edit --version`).
-6. Публикация релиза с бинарём:
+6. Публикация релиза с бинарём выполняется **автоматически**: пуш тега
+   `vX.Y` в GitHub запускает workflow `.github/workflows/release.yml`
+   (сборка статического бинаря с версией из тега, формирование `SHA256SUMS`
+   и создание GitHub Release с бинарём, контрольными суммами и
+   автогенерированными заметками). Повторный пуш того же тега завершится
+   ошибкой «release already exists» — workflow работает fail-loud: при
+   пересоздании тега сначала удалите старый релиз (`gh release delete vX.Y`).
+   Ручной вариант остаётся запасным:
 
    ```bash
    gh release create vX.Y ./fstab-edit \
@@ -232,18 +242,20 @@ feature-ветки этапов создаются от `dev` и merge'ятся 
 │   ├── deps.go           # Границы отказа TUI (fake-реализации в тестах)
 │   └── theme.go          # Палитры тем и semantic-стили подсветки
 ├── docs/
-│   ├── user-guide.md     # Руководство пользователя (PDF: make pdf)
+│   ├── user-guide.md     # Руководство пользователя RU (PDF: make pdf)
+│   ├── user-guide.en.md  # Руководство пользователя EN (PDF: make pdf)
 │   ├── DEVELOPMENT.md    # Этот документ
 │   ├── spec/             # ТЗ проекта (v1.0 архив, v2.0 — основа разработки)
 │   ├── stage-1-tz.md     # ТЗ этапа 1
 │   ├── superpowers/      # Планы разработки (только ветка dev)
 │   └── man/
-│       └── fstab-edit.1  # Man-страница (make install ставит её в man1)
+│       ├── fstab-edit.1     # Man-страница EN (make install: share/man/man1)
+│       └── fstab-edit.ru.1  # Man-страница RU (make install: share/man/ru/man1)
 ├── examples/
 │   ├── config-minimal.yaml  # Минимальный пример конфигурации
 │   └── config-full.yaml     # Все ключи конфигурации с пояснениями
 ├── CHANGELOG.md          # История изменений (Keep a Changelog)
 ├── Makefile              # build/install/uninstall/test/pdf/version
 ├── AGENTS.md             # Правила проекта для AI-агентов (архитектура, workflow)
-├── README.md             # Обзор проекта для пользователей
+├── README.md             # Обзор проекта для пользователей (EN, основной; RU — README.ru.md)
 ```
