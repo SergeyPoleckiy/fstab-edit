@@ -197,8 +197,16 @@ func (m model) viewHistory() string {
 		}
 	}
 	if m.history.confirm {
+		// При dirty-сессии предупреждаем, что несохранённые изменения будут
+		// потеряны: restore заменяет target на диске, после чего сессия
+		// перечитывается через reloadFromDisk и несохранённый candidate
+		// безвозвратно отбрасывается.
+		key := "history_confirm_restore"
+		if m.session != nil && m.session.dirty {
+			key = "history_confirm_restore_dirty"
+		}
 		b.WriteString("\n" + m.theme.Warning.Render(
-			Trf(m.opts.Lang, "history_confirm_restore", m.history.Selected().ID)) + "\n")
+			Trf(m.opts.Lang, key, m.history.Selected().ID)) + "\n")
 	}
 	b.WriteString("\n" + m.theme.Muted.Render(Tr(m.opts.Lang, "keys_history")) + "\n")
 	return b.String()

@@ -65,6 +65,13 @@ func (m model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = ScreenForm
 		}
 	case "insert", "i":
+		// Форма добавления бесполезна на loadErr-экране: документ не загружен,
+		// сессия nil, поэтому save всё равно отказал бы. Вместо формы показываем
+		// статус-подсказку: сначала нужно восстановить загрузку (F5).
+		if m.session == nil {
+			m.status = m.theme.Muted.Render(Tr(m.opts.Lang, "form_need_document"))
+			break
+		}
 		m.form = newAddForm()
 		m.form.devices, m.form.devicesErr = loadFormDevices(context.Background(), &m)
 		m.form.refreshHints()

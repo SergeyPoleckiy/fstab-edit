@@ -283,6 +283,101 @@ func TestCommentToggleFlow(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
 }
 
+// TestCtrlCReturnsFromSubscreens фиксирует правило «ctrl+c на подэкране =
+// Esc»: на каждом read-only экране-просмотрщике ctrl+c возвращает на главную
+// таблицу, а не завершает программу посреди просмотра.
+func TestCtrlCReturnsFromSubscreens(t *testing.T) {
+	subscreens := []Screen{
+		ScreenDiff, ScreenMounts, ScreenLog, ScreenHelp,
+		ScreenBlockDevices, ScreenHistory, ScreenSaveResult,
+	}
+	for _, s := range subscreens {
+		m := testModel(t, testOptions(t, writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\n")))
+		m.screen = s
+		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		got := updated.(model)
+		if got.ScreenNow() != ScreenTable {
+			t.Fatalf("экран %v: ctrl+c не вернул таблицу: %v", s, got.ScreenNow())
+		}
+		if cmd != nil {
+			t.Fatalf("экран %v: ctrl+c не должен выдавать команду, получено %v", s, cmd)
+		}
+	}
+}
+
+// TestCtrlCOnTableKeepsQuitFlow: на главной таблице поведение ctrl+c прежнее —
+// чистая сессия завершает программу (команда tea.Quit), а не «возврат на
+// таблицу». Dirty-вариант (подтверждение ScreenConfirmQuit) покрыт отдельно в
+// views_test.go.
+func TestCtrlCOnTableKeepsQuitFlow(t *testing.T) {
+	m := testModel(t, testOptions(t, writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\n")))
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	got := updated.(model)
+	if got.ScreenNow() != ScreenTable {
+		t.Fatalf("ctrl+c на таблице не должен менять экран: %v", got.ScreenNow())
+	}
+	if cmd == nil {
+		t.Fatal("ctrl+c на чистой таблице должен завершать программу (tea.Quit)")
+	}
+}
+
+// TestBlockDevicesCtrlCAndReloadFlow — сквозной teatest-сценарий экрана
+// устройств: 'r' перечитывает список через seam (второе поколение данных
+// заменяет первое без выхода с экрана), ctrl+c возвращает на таблицу как Esc.
+func TestBlockDevicesCtrlCAndReloadFlow(t *testing.T) {
+	target := writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\nUUID=bbb /mnt/data ext4 rw 0 2\n")
+	calls := 0
+	opts := testOptions(t, target)
+	opts.Deps.ListBlockDevices = func(context.Context, sysutil.CommandRunner) ([]sysutil.BlockDevice, error) {
+		calls++
+		if calls == 1 {
+			return []sysutil.BlockDevice{
+				{Name: "sda", Path: "/dev/sda", Type: "disk", Size: "1G"},
+			}, nil
+		}
+		return []sysutil.BlockDevice{
+			{Name: "nvme0n1", Path: "/dev/nvme0n1", Type: "disk", Size: "2T"},
+		}, nil
+	}
+	m := NewModel(opts)
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(120, 30))
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return strings.Contains(string(b), "/mnt/data")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// B — экран устройств, первое поколение данных.
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'B'}})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		s := string(b)
+		return strings.Contains(s, "Блочные устройства") && strings.Contains(s, "/dev/sda")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// 'r' — перечитывание списка без выхода с экрана: второе поколение на месте.
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		s := string(b)
+		return strings.Contains(s, "/dev/nvme0n1") && !strings.Contains(s, "/dev/sda")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// Ctrl+C — возврат на таблицу (как Esc): записи fstab снова видны.
+	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		s := string(b)
+		return strings.Contains(s, "/mnt/data") && !strings.Contains(s, "Блочные устройства")
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(3*time.Second))
+
+	// Чистая сессия: выход без подтверждения; target не изменён.
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("прочитать target: %v", err)
+	}
+	if !strings.Contains(string(data), "UUID=bbb") {
+		t.Fatalf("target на диске изменился read-only экраном: %q", data)
+	}
+}
+
 // TestFormCompletionFlow проверяет сквозной сценарий автодополнения в TTY:
 // Ins открывает форму с устройствами, подменёнными через seam (реальный lsblk
 // не выполняется), Ctrl+N подставляет UUID= первого устройства в поле device,

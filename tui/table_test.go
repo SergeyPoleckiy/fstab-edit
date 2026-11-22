@@ -2,10 +2,12 @@ package tui
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
@@ -315,5 +317,38 @@ func TestHighlightPreview(t *testing.T) {
 	}
 	if got := stripANSI(m.highlightPreview("UUID=aaa /")); got != "UUID=aaa /" {
 		t.Fatalf("не-таб preview должен вернуться как есть: %q", got)
+	}
+}
+
+// TestInsertOnLoadErrDoesNotOpenForm проверяет, что 'i'/Ins на loadErr-экране
+// (документ не загружен, session == nil) НЕ открывают форму добавления: форма
+// бесполезна без документа, а save всё равно отказал бы. Вместо формы —
+// статус-подсказка form_need_document, видимая в рендере loadErr-экрана.
+func TestInsertOnLoadErrDoesNotOpenForm(t *testing.T) {
+	// Target не существует: NewModel фиксирует loadErr и оставляет session nil.
+	target := filepath.Join(t.TempDir(), "missing-fstab")
+	m := testModel(t, testOptions(t, target))
+	if m.loadErr == nil {
+		t.Fatal("ожидалась ошибка загрузки (loadErr)")
+	}
+	if m.session != nil {
+		t.Fatal("при loadErr session должен быть nil")
+	}
+
+	for _, key := range []tea.KeyMsg{keyRunes('i'), {Type: tea.KeyInsert}} {
+		updated, _ := m.Update(key)
+		m = updated.(model)
+		if m.ScreenNow() != ScreenTable {
+			t.Fatalf("клавиша %q на loadErr-экране открыла экран %v, форма запрещена",
+				key.String(), m.ScreenNow())
+		}
+		if !strings.Contains(m.status, "исправьте загрузку файла (F5)") {
+			t.Fatalf("статус-подсказка не показана: %q", m.status)
+		}
+	}
+
+	// Подсказка видна и в рендере loadErr-экрана, а не только в поле модели.
+	if view := m.View(); !strings.Contains(view, "исправьте загрузку файла (F5)") {
+		t.Fatalf("loadErr-экран не рендерит статус-подсказку: %q", view)
 	}
 }

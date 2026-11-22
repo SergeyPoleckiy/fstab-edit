@@ -171,12 +171,38 @@ func sudoUID() string {
 // Init bubbletea: нет фоновых команд на старте.
 func (m model) Init() tea.Cmd { return nil }
 
+// isViewSubscreen сообщает, что экран — read-only подэкран-просмотрщик, где
+// ctrl+c дублирует Esc (возврат на главную таблицу). Главная таблица
+// (quit-flow: ctrl+c при dirty открывает подтверждение выхода), форма
+// (ctrl+c там завершает программу, своя обработка в form.go) и модальные
+// подтверждения (ctrl+c = «нет», что и так возвращает на таблицу) сюда не
+// входят.
+func isViewSubscreen(s Screen) bool {
+	switch s {
+	case ScreenDiff, ScreenMounts, ScreenLog, ScreenHelp,
+		ScreenBlockDevices, ScreenHistory, ScreenSaveResult, ScreenConflict:
+		return true
+	default:
+		return false
+	}
+}
+
 // Update обрабатывает сообщения. Навигация общая для всех экранов:
-// Esc возвращает на таблицу; выход при несохранённых изменениях идёт через
-// модальное подтверждение ScreenConfirmQuit (ТЗ §9.2).
+// Esc возвращает на таблицу; ctrl+c на подэкранах-просмотрщиках делает то же
+// самое; выход при несохранённых изменениях идёт через модальное подтверждение
+// ScreenConfirmQuit (ТЗ §9.2).
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Ctrl+C на подэкранах-просмотрщиках работает как Esc: пользователь
+		// ожидает отмены текущего экрана, а не мгновенного выхода из программы
+		// посреди просмотра. Перехват идёт до маршрутизации по экранам, поэтому
+		// покрывает и подэкраны без собственного update* (help, save-result,
+		// conflict), которые обрабатываются веткой default ниже.
+		if msg.String() == "ctrl+c" && isViewSubscreen(m.screen) {
+			m.screen = ScreenTable
+			return m, nil
+		}
 		switch m.screen {
 		case ScreenTable:
 			return m.updateTable(msg)
@@ -206,8 +232,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View рендерит активный экран.
 func (m model) View() string {
 	if m.loadErr != nil {
-		return Trf(m.opts.Lang, "load_error", m.opts.Target, m.loadErr.Error()) + "\n\n" +
+		view := Trf(m.opts.Lang, "load_error", m.opts.Target, m.loadErr.Error()) + "\n\n" +
 			Tr(m.opts.Lang, "keys_help_hint") + "\n"
+		// Статусный ряд (например, подсказка form_need_document при 'i' на этом
+		// экране) показывается под подсказкой клавиш — иначе пользователь его не
+		// увидел бы: таблица с блоком статуса не рендерится.
+		if m.status != "" {
+			view += "\n" + m.theme.Info.Render(m.status) + "\n"
+		}
+		return view
 	}
 	switch m.screen {
 	case ScreenTable:

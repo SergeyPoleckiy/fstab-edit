@@ -379,3 +379,47 @@ func TestHistoryViewFormatsCreated(t *testing.T) {
 		t.Fatalf("raw RFC3339Nano утёк в экран истории: %q", view)
 	}
 }
+
+// TestHistoryRestoreConfirmDirtyWarning проверяет текст модального
+// подтверждения restore: чистая сессия показывает прежний history_confirm_restore,
+// dirty-сессия — history_confirm_restore_dirty с предупреждением, что
+// несохранённые изменения будут потеряны (restore перечитывает сессию с диска).
+func TestHistoryRestoreConfirmDirtyWarning(t *testing.T) {
+	target := writeTestFstab(t, "UUID=aaa / ext4 defaults 0 1\n")
+	createTestBackup(t, target, "UUID=aaa / ext4 defaults 0 1\n",
+		time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC))
+	m := testModel(t, testOptions(t, target))
+	m.history = loadHistory(&m)
+	if len(m.history.Backups) == 0 {
+		t.Fatal("история пуста: сценарию нужна хотя бы одна копия")
+	}
+	m.screen = ScreenHistory
+
+	// Чистая сессия: обычный текст подтверждения, без предупреждения о потере.
+	updated, _ := m.Update(keyRunes('r'))
+	m = updated.(model)
+	if !m.history.confirm {
+		t.Fatal("'r' должна включать модальное подтверждение restore")
+	}
+	view := m.View()
+	if !strings.Contains(view, "восстановить копию") {
+		t.Fatalf("подтверждение restore не показано: %q", view)
+	}
+	if strings.Contains(view, "потеряны") {
+		t.Fatalf("чистая сессия не должна предупреждать о потере изменений: %q", view)
+	}
+
+	// Отмена подтверждения (default No), затем dirty-сессия: предупреждение есть.
+	updated, _ = m.Update(keyRunes('n'))
+	m = updated.(model)
+	if m.history.confirm {
+		t.Fatal("'n' должна отменять подтверждение restore")
+	}
+	m.session.dirty = true
+	updated, _ = m.Update(keyRunes('r'))
+	m = updated.(model)
+	view = m.View()
+	if !strings.Contains(view, "Несохранённые изменения будут потеряны") {
+		t.Fatalf("dirty-сессия должна предупреждать о потере изменений: %q", view)
+	}
+}
