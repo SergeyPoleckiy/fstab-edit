@@ -1,0 +1,54 @@
+# Полный пример конфигурации fstab-edit: все ключи YAML-схемы (ТЗ §13.3)
+# с пояснением каждого. Значения совпадают с дефолтами (config.Default()),
+# кроме явно отмеченных примеров; незаданные ключи в реальном файле можно
+# опускать — они возьмутся из дефолтов или уровней приоритета ниже.
+#
+# Приоритеты (ТЗ §13.1): CLI-флаги > FSTAB_EDIT_* env > user YAML >
+# system YAML > defaults. Этот файл — один из YAML-уровней: env и CLI-флаги
+# его переопределяют.
+#
+# Куда положить: ~/.config/fstab-edit/config.yaml (user, не-root) или
+# /etc/fstab-edit/config.yaml (system, только root-ownership), либо
+# передать явно через --config <path>.
+#
+# Требования безопасности (ТЗ §13.2): не group/others-writable (0644 или
+# строже), не symlink; неизвестный ключ — ошибка конфигурации (exit code 2),
+# некорректное значение — тоже exit code 2, нарушение владельца/прав — 3.
+
+# Путь к редактируемому fstab (default: /etc/fstab). Переопределяется
+# флагом --file и переменной FSTAB_EDIT_FILE.
+fstab_path: /etc/fstab
+
+backup:
+  # Каталог резервных копий (default: пусто = каталог target). Переопределяется
+  # FSTAB_EDIT_BACKUP_DIR. Каталог должен существовать или создаваться вызывающей
+  # средой; fstab-edit пишет копии с mode 0600.
+  dir: ""
+  # Префикс имён файлов копий: <prefix>.<backup ID> и <prefix>.<backup ID>.json
+  # (default: fstab.bak).
+  prefix: fstab.bak
+  # Сколько newest-копий сохраняет ротация; значение должно быть > 0
+  # (default: 10).
+  keep: 10
+
+log:
+  # Файл JSON Lines-журнала (default: /var/log/fstab-edit.log), mode 0600.
+  # Недоступный журнал блокирует мутации и сохранение в TUI (exit code 3/6).
+  file: /var/log/fstab-edit.log
+  # Уровень журнала: debug | info | warn | error (default: info).
+  # Переопределяется FSTAB_EDIT_LOG_LEVEL.
+  level: info
+  # Порог ротации журнала в МиБ; значение должно быть > 0 (default: 10).
+  max_size_mb: 10
+  # Глубина ротации журнала (файлы <file>.1 ... <file>.N); > 0 (default: 5).
+  keep: 5
+
+tui:
+  # Тема оформления TUI: dark | light | high-contrast | monochrome
+  # (default: dark). Неизвестное имя отклоняется ошибкой конфигурации.
+  # Влияет только на TUI, на CLI не действует.
+  theme: dark
+
+# Язык (ru|en) и формат вывода (table|json|csv|tsv) из YAML НЕ читаются
+# (ТЗ §13.3): они задаются только через env (FSTAB_EDIT_LANG, FSTAB_EDIT_OUTPUT)
+# и CLI-флаги (--lang, --output).

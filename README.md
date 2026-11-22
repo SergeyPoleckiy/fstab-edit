@@ -187,7 +187,9 @@ work/
 ├── pkg/
 │   └── models/           # Публичные модели данных
 ├── tui/                  # TUI-интерфейс
-├── docs/                 # Документация проекта
+├── docs/                 # Документация проекта (user-guide, man, DEVELOPMENT.md)
+├── examples/             # Примеры конфигурации (config-minimal.yaml, config-full.yaml)
+├── CHANGELOG.md          # История изменений (Keep a Changelog)
 ├── LICENSE.en            # Лицензия MIT, английский текст
 ├── LICENSE.ru            # Неофициальный перевод лицензии MIT
 └── README.md             # Этот файл
@@ -253,6 +255,13 @@ golangci-lint run
 8. Automatic rollback transaction использует backup текущей операции напрямую и не переопределяет выбор через повторный `Select`. Manual rollback подключён в `cmd/rollback.go`: выбор копии выполняется до safety backup через positional ID или `--restore` (по умолчанию — newest), подтверждение с diff обязательно (non-TTY требует `--yes`), а `--dry-run` показывает выбранную копию и diff без создания safety copy и без записи target.
 
 ## Лицензия
+
+Документация проекта:
+
+- [CHANGELOG.md](CHANGELOG.md) — история изменений по релизам.
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — архитектура, сборка, стандарты кода и релизный процесс для разработчиков.
+- [examples/](examples/) — примеры конфигурации (`config-minimal.yaml`, `config-full.yaml`).
+- [docs/man/fstab-edit.1](docs/man/fstab-edit.1) — man-страница (после `make install` — `man fstab-edit`).
 
 - [MIT License — English](LICENSE.en)
 - [Лицензия MIT — русский перевод](LICENSE.ru)
