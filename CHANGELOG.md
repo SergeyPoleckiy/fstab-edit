@@ -5,7 +5,7 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версии проекта следуют [Semantic Versioning](https://semver.org/lang/ru/).
 
-## [Unreleased]
+## [1.4] — 2026-11-22
 
 ### Added
 
@@ -23,6 +23,8 @@
   `README.ru.md`, английская версия руководства `docs/user-guide.en.md`,
   русская man-страница `docs/man/fstab-edit.ru.1`; `make pdf` собирает оба
   PDF, `make install` ставит обе man-страницы (выбор по локали).
+
+## [Unreleased]
 
 ## [1.3] — 2026-11-22
 
