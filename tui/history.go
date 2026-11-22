@@ -125,7 +125,13 @@ func (m model) updateHistory(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.status = m.theme.MarkError(result.Err.Error())
 				}
 			} else {
-				m.status = m.theme.Info.Render(Tr(m.opts.Lang, "history_restore_ok"))
+				// reloadFromDisk внутри restoreSelected уже оставил в статусе
+				// load_error, если перечитывание сорвалось (сессия занулена) —
+				// «restore ok» пишем только при восстановленной сессии, иначе
+				// маскируем потерю сессии ложным успехом.
+				if m.loadErr == nil {
+					m.status = m.theme.Info.Render(Tr(m.opts.Lang, "history_restore_ok"))
+				}
 			}
 			m.screen = ScreenTable
 			return m, nil
