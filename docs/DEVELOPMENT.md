@@ -10,13 +10,18 @@
 Зависимости идут в одну сторону, обратных импортов нет:
 
 ```text
-cmd/, tui/  →  internal/*  →  pkg/models
+cmd/  →  tui/  →  internal/*  →  pkg/models
+  └──────────────────↗
 ```
 
-- `cmd` и `tui` — два интерфейса (CLI на Cobra и TUI на bubbletea) поверх
-  одного и того же доменного ядра. Отдельной реализации записи в TUI нет:
-  сохранение и restore идут через те же `internal/transaction` и
-  `internal/backup`, что и CLI.
+- `cmd` — wiring поверх обоих интерфейсов: содержит только сборку (команды
+  Cobra, флаги, резолв настроек, prompt-подтверждения, маппинг exit codes) и
+  напрямую импортирует как `tui` (команда `tui`), так и `internal/*` для CLI-
+  команд. Доменная логика CLI живёт в `internal/cliapp`.
+- `tui` — второй интерфейс (TUI на bubbletea) поверх того же доменного ядра.
+  Отдельной реализации записи в TUI нет: сохранение и restore идут через те
+  же `internal/transaction` и `internal/backup`, что и CLI. `tui` не
+  импортируется из `internal/*`; обратных импортов из internal в tui нет.
 - `internal/*` — доменная логика и инфраструктура; пакеты внутри слоя
   не образуют циклов (например, `transaction` использует `backup`, `writer`,
   `validator` и `sysutil`, но не наоборот).
@@ -99,8 +104,8 @@ service-обработчики команд, rollback-flow. Сюда же вын
 устройств/истории/журнала/помощи, темы dark/light/high-contrast/monochrome.
 Граница отказа — `tui.Deps` (зеркало `cliapp.Dependencies` плюс журнал):
 тесты подменяют fake-реализациями чтение target, транзакцию, список копий,
-устройства и журнал. TUI не импортируется из `cmd` или `internal` —
-направление зависимости только `tui → internal`.
+устройства и журнал. Обратных импортов нет: `tui` не импортирует `cmd` и не
+импортируется ни одним пакетом `internal/*`.
 
 ### Транзакционная запись
 
@@ -181,8 +186,11 @@ go test -race ./...   # рекомендуется для изменений в 
 1. Финальный whole-branch review и merge ветки этапа в `dev` (fast-forward).
 2. Подготовка релиза: `dev` проверен и готов; версия берётся из git, ручной
    ввод не нужен (`git describe --tags`).
-3. Fast-forward merge `dev` → `main`.
-4. Тег релиза на `main`: `git tag -a vX.Y -m "release vX.Y"`.
+3. Merge `dev` → `main`: предпочтительно fast-forward; при расхождении
+   веток — merge с разрешением конфликтов. Публикация ветки и тега:
+   `git push origin main`.
+4. Тег релиза на `main`: `git tag -a vX.Y -m "release vX.Y"`;
+   публикация: `git push origin vX.Y`.
 5. Сборка из тега: `make build` — версия бинаря будет ровно `vX.Y`
    (проверить `make version` и `./fstab-edit --version`).
 6. Публикация релиза с бинарём:
