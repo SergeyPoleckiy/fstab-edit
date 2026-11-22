@@ -19,8 +19,8 @@
 - Реализована доменная transaction в `internal/transaction`: internal validation, lock, повторный base SHA-256, `findmnt` candidate check, backup текущей операции, atomic replace, post-check, один automatic rollback и ротация после полного успеха.
 - Реализован CLI на Cobra (`cmd/`, `main.go`): десять команд `list`, `add`, `edit`, `delete`, `comment`, `uncomment`, `validate`, `verify-mount`, `backup`, `rollback`; dry-run, подтверждения `[y/N]`, unified diff, селекторы записей с кодом неоднозначности 8 и форматы вывода `table`/`json`/`csv`/`tsv` со `schema_version: 1`. Тесты CLI работают только с временными файлами, fake runner и scripted stdin; реальный `/etc/fstab` и findmnt не затрагиваются.
 - Реализованы YAML-конфигурация с приоритетами и security-checks (`internal/config`), структурный JSON Lines-журнал с rotation и redaction (`internal/logger`) и локализация RU/EN (`internal/i18n`); оба пакета подключены к CLI: настройки резолвятся до handler'ов, журнал открывается до любой мутации и фиксирует исход операций. Команда `tui` открывает полноценный TUI-редактор (см. раздел «TUI» ниже).
-- Актуальная основа разработки: [ТЗ версии 2.0](../fstab-editor-v2.md).
-- Исходная редакция сохранена: [ТЗ версии 1.0](../fstab-editor.md).
+- Актуальная основа разработки: [ТЗ версии 2.0](docs/spec/fstab-editor-v2.md).
+- Исходная редакция сохранена: [ТЗ версии 1.0](docs/spec/fstab-editor.md).
 
 ## Установка
 
